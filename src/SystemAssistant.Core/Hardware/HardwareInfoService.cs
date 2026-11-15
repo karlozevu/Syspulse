@@ -162,10 +162,33 @@ public sealed class HardwareInfoService : IHardwareInfoService
 
     #region CPU
 
+    /// <summary>
+    /// CPU 三级缓存容量（KB）。依据 WMI / CIM 语义：
+    /// Win32_CacheMemory.Level：3=Primary(L1)、4=Secondary(L2)、5=Tertiary(L3)。
+    /// 注意 Level 的数字是「层级代号」，并不等于 L1/L2/L3 的序号，切勿把 Level=3 误当成 L3。
+    /// Win32_CacheMemory.MaxCacheSize 与 Win32_Processor.L2CacheSize / L3CacheSize 单位均为 KB。
+    /// L1 取 Level=3(Primary) 的合计；L2 / L3 优先用 Win32_Processor 的规格值，
+    /// 取不到时回落到 Level=4(Secondary) / Level=5(Tertiary) 的合计；任何一级不可靠都置 0（界面显示 N/A）。
+    /// </summary>
+    private static (long L1, long L2, long L3) BuildCacheSizes(WmiObject? processor)
+    {
+        var caches = Select(CimV2, "Win32_CacheMemory");
+        long SumByLevel(int level) => Math.Max(0, caches
+            .Where(c => c.Int32("Level") == level)
+            .Sum(c => c.Int64("MaxCacheSize")));
+
+        var l1 = SumByLevel(3);                                    // Primary = L1
+        var l2 = Math.Max(0, processor?.Int64("L2CacheSize") ?? 0);
+        var l3 = Math.Max(0, processor?.Int64("L3CacheSize") ?? 0);
+        if (l2 == 0) l2 = SumByLevel(4);                           // Secondary = L2
+        if (l3 == 0) l3 = SumByLevel(5);                           // Tertiary = L3
+        return (l1, l2, l3);
+    }
+
     private CpuInfo BuildCpu()
     {
         var processor = First(CimV2, "Win32_Processor");
-        var l1 = Select(CimV2, "Win32_CacheMemory", "Level = 3").Sum(x => x.Int64("MaxCacheSize"));
+        var (l1Cache, l2Cache, l3Cache) = BuildCacheSizes(processor);
         var cpu = new CpuInfo
         {
             Name = processor?.String("Name") ?? string.Empty,
@@ -176,9 +199,9 @@ public sealed class HardwareInfoService : IHardwareInfoService
             BaseClockMHz = processor?.Double("MaxClockSpeed") ?? 0,
             // WMI 不提供睿频规格；保持 0，界面显示 N/A（详见 README「已知限制」）
             MaxTurboMHz = 0,
-            L1CacheKB = l1,
-            L2CacheKB = processor?.Int64("L2CacheSize") ?? 0,
-            L3CacheKB = processor?.Int64("L3CacheSize") ?? 0,
+            L1CacheKB = l1Cache,
+            L2CacheKB = l2Cache,
+            L3CacheKB = l3Cache,
             UsagePercent = WindowsNativeInfo.GetCpuUsagePercent() ?? processor?.Double("LoadPercentage") ?? 0,
             CurrentClockMHz = processor?.Double("CurrentClockSpeed") ?? 0
         };

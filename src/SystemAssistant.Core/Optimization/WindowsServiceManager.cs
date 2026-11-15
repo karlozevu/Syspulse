@@ -180,8 +180,10 @@ public sealed class WindowsServiceManager : IWindowsServiceManager
     {
         if (!IsValidServiceName(serviceName, out var invalid)) return OperationResult.Fail(invalid);
         var highRisk = HighRiskServices.Contains(serviceName);
-        if (highRisk && mode == ServiceStartMode.Disabled)
-            return OperationResult.Fail("禁止将高风险服务设为禁用：" + HighRiskHint);
+        // 高风险服务设为 Disabled 仅在「未完成二次确认」时拒绝；
+        // 三个 public 入口已传入 highRiskConfirmed: true，且 UI 有二次确认，确认后允许执行。
+        if (highRisk && mode == ServiceStartMode.Disabled && !highRiskConfirmed)
+            return OperationResult.Fail("禁止将高风险服务设为禁用（需先完成二次确认）：" + HighRiskHint);
         if (highRisk && !highRiskConfirmed)
             return OperationResult.Fail("高风险服务必须先完成二次确认：" + HighRiskHint);
 
@@ -224,21 +226,24 @@ public sealed class WindowsServiceManager : IWindowsServiceManager
                 return OperationResult.Fail(message);
             }
 
-            // 「自动（延迟启动）」由注册表的 DelayedAutoStart 附加标记控制
-            if (mode == ServiceStartMode.AutomaticDelayedStart)
+            // 「自动（延迟启动）」由注册表的 DelayedAutoStart 附加标记控制；
+            // OpenSubKey 返回 null 说明未能以可写方式打开，必须失败而不是静默跳过（否则会误报成功）。
+            if (mode is ServiceStartMode.AutomaticDelayedStart or ServiceStartMode.Automatic)
             {
                 using var key = Registry.LocalMachine.OpenSubKey(
                     $@"SYSTEM\CurrentControlSet\Services\{serviceName}", writable: true);
-                key?.SetValue("DelayedAutoStart", 1, RegistryValueKind.DWord);
-            }
-            else if (mode == ServiceStartMode.Automatic)
-            {
-                using var key = Registry.LocalMachine.OpenSubKey(
-                    $@"SYSTEM\CurrentControlSet\Services\{serviceName}", writable: true);
-                key?.SetValue("DelayedAutoStart", 0, RegistryValueKind.DWord);
+                if (key is null)
+                {
+                    var message = $"无法写入 {serviceName} 的 DelayedAutoStart（未能以可写方式打开服务注册表键）";
+                    _log.Log(OperationType.Service, "修改启动类型", $"{serviceName} → {mode}", false, message);
+                    return AppendRiskHint(OperationResult.Fail(message), serviceName);
+                }
+                key.SetValue("DelayedAutoStart",
+                    mode == ServiceStartMode.AutomaticDelayedStart ? 1 : 0, RegistryValueKind.DWord);
             }
 
             _log.Log(OperationType.Service, "修改启动类型", $"{serviceName} → {mode}", true);
+            // 成功结果仍经过 AppendRiskHint，高风险服务的 Message 会带上风险提示文字
             return AppendRiskHint(OperationResult.Ok(), serviceName);
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException

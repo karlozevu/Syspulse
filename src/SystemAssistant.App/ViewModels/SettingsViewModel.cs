@@ -30,16 +30,15 @@ public sealed class SettingsViewModel : ViewModelBase
         _languageIndex = (int)settings.Language;
         _refreshIntervalMs = settings.ClampRefreshInterval();
         _temperatureThreshold = settings.Thresholds.FirstOrDefault(t => t.Kind == SensorKind.Temperature)?.MaxValue ?? 85;
-        _exportPath = settings.DefaultExportDirectory;
-        _backupPath = settings.RegistryBackupDirectory;
-        _updateUrl = settings.UpdateCheckUrl;
-        _whitelistText = string.Join(Environment.NewLine, settings.Whitelist.Select(r => r.Pattern));
-        _customPathsText = string.Join(Environment.NewLine, settings.CustomScanPaths);
+        ReloadTextFields();
 
         SaveCommand = new RelayCommand(Save);
         BrowseExportCommand = CreateCommand(BrowseExportAsync);
         BrowseBackupCommand = CreateCommand(BrowseBackupAsync);
         CheckUpdateCommand = CreateCommand(CheckUpdateAsync);
+
+        // 清理页与设置页共享同一份配置，任一处保存后都刷新本页文本，避免互相覆盖。
+        Services.Settings.Changed += OnSettingsChanged;
     }
 
     public ICommand SaveCommand { get; }
@@ -116,6 +115,38 @@ public sealed class SettingsViewModel : ViewModelBase
             ? LF("Update_Available", info.LatestVersion, info.CurrentVersion) + "  " + info.ReleaseNotes
             : info.Message;
         StatusMessage = UpdateMessage;
+    }
+
+    /// <summary>
+    /// 从共享设置重新加载文本字段（主题 / 语言 / 间隔 / 阈值等数值项不重载，
+    /// 以免覆盖用户尚未保存的编辑）；值相同则不更新，避免自己保存触发的回环。
+    /// </summary>
+    private bool ReloadTextFields()
+    {
+        var settings = Services.Settings.Current;
+        var exportPath = settings.DefaultExportDirectory;
+        var backupPath = settings.RegistryBackupDirectory;
+        var updateUrl = settings.UpdateCheckUrl;
+        var whitelist = string.Join(Environment.NewLine, settings.Whitelist.Select(r => r.Pattern));
+        var customPaths = string.Join(Environment.NewLine, settings.CustomScanPaths);
+        var changed = false;
+        if (!string.Equals(_exportPath, exportPath, StringComparison.Ordinal)) { _exportPath = exportPath; changed = true; }
+        if (!string.Equals(_backupPath, backupPath, StringComparison.Ordinal)) { _backupPath = backupPath; changed = true; }
+        if (!string.Equals(_updateUrl, updateUrl, StringComparison.Ordinal)) { _updateUrl = updateUrl; changed = true; }
+        if (!string.Equals(_whitelistText, whitelist, StringComparison.Ordinal)) { _whitelistText = whitelist; changed = true; }
+        if (!string.Equals(_customPathsText, customPaths, StringComparison.Ordinal)) { _customPathsText = customPaths; changed = true; }
+        return changed;
+    }
+
+    private void OnSettingsChanged()
+    {
+        if (ReloadTextFields()) RaiseAll();
+    }
+
+    public override void Dispose()
+    {
+        Services.Settings.Changed -= OnSettingsChanged;
+        base.Dispose();
     }
 
     private static IReadOnlyList<string> ParseLines(string text)

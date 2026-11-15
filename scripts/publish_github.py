@@ -6,13 +6,15 @@ Why API instead of git push:
   Some corporate proxies reject the CONNECT tunnel used by libcurl inside Git
   (HTTP 502) while ordinary HTTPS to api.github.com works fine. This script
   creates the repository, commits the full source tree as blobs/tree/commit,
-  and optionally creates a v1.0.0 Release with the portable single-file
-  archives attached.
+  and optionally creates a versioned Release with the portable single-file
+  archives and the installer attached. The version defaults to <Version> in
+  Directory.Build.props, so bumping the app version needs no script change.
 
 Usage:
   set GITHUB_TOKEN=ghp_xxx            (Windows)
   export GITHUB_TOKEN=ghp_xxx         (bash)
   python scripts/publish_github.py --repo System-Assistant --visibility public
+  python scripts/publish_github.py --version 1.2.0   # explicit version / new tag
 
   # or pass the token directly (not recommended: it appears in shell history)
   python scripts/publish_github.py --token ghp_xxx
@@ -32,6 +34,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -89,6 +92,17 @@ class GitHub:
     def me(self) -> str:
         _, user = self.request("GET", f"{API}/user")
         return user["login"]
+
+
+def read_project_version(root: Path) -> str:
+    """Single source of truth: <Version> in Directory.Build.props."""
+    props = root / "Directory.Build.props"
+    if props.is_file():
+        match = re.search(r"<Version>\s*([^<]+?)\s*</Version>",
+                          props.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1).strip()
+    return "1.1.0"
 
 
 def read_tracked_files(root: Path):
@@ -172,48 +186,70 @@ def push_tree(gh: GitHub, owner: str, repo: str, root: Path, branch: str, messag
     return commit["sha"]
 
 
-def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path, branch: str, root: Path):
-    """Create or update the v1.0.0 release. Idempotent: safe to re-run after a rebuild."""
+def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path,
+                   branch: str, root: Path, version: str):
+    """Create or update the release for `version`. Idempotent: safe after a rebuild."""
+    tag = f"v{version}"
+    setup_name = f"SystemAssistant-Setup-{version}.exe"
+    title = f"System Assistant {tag}"
+
     changelog = root / "CHANGELOG.md"
-    body = changelog.read_text(encoding="utf-8") if changelog.exists() else "System Assistant v1.0.0"
-    body += "\n\n---\n\n**下载 / Downloads**\n\n" \
-            "- `SystemAssistant-Setup-1.0.0.exe` — Windows 安装向导（推荐；免 UAC，含卸载程序）\n" \
-            "- `win-x64-self-contained.zip` — 绿色单文件便携版，无需安装 .NET 运行时\n" \
-            "- `win-x64-framework-dependent.zip` — 绿色单文件便携版，需 .NET 9 Desktop Runtime\n" \
-            "\n> 本次为 1.0.0 复检修订（安全加固、缺陷修复、外观重做、安装包与应用图标）。" \
-            "完整清单见仓库 `REVIEW.md`。\n"
+    notes = changelog.read_text(encoding="utf-8") if changelog.exists() else title
+    body = (
+        f"## {title}\n\n"
+        "Windows 硬件监控、安全清理与系统优化工具（C# .NET 9 + Avalonia UI，"
+        "Models / Utils / Core / App 四层架构）。所有高危操作二次确认并写日志，"
+        "不联网上传任何用户数据。\n\n"
+        "**本版本亮点**：全功能复测与修复 —— 传感器在驱动不可用时改用 Win32 "
+        "API 推送 CPU / 内存快照、管理员提权后自动关闭旧窗口、修复日志/清理/优化/工具箱"
+        "多处功能断点，并剔除恒为空的展示项与不可靠调优开关。\n\n"
+        "**下载 / Downloads**\n\n"
+        f"- `{setup_name}` — Windows 安装向导（推荐；免 UAC，含卸载程序）\n"
+        "- `win-x64-self-contained.zip` — 绿色单文件便携版，无需安装 .NET 运行时\n"
+        "- `win-x64-framework-dependent.zip` — 绿色单文件便携版，需 .NET 9 Desktop Runtime\n\n"
+        "> 完整清单见仓库 `FUNCTIONAL-TEST.md`（全功能实测）、`REVIEW.md`（静态复检）"
+        "与 `CHANGELOG.md`（逐版变更）。\n\n---\n\n" + notes
+    )
 
     base = f"{API}/repos/{owner}/{repo}/releases"
     existing = None
     try:
-        _, existing = gh.request("GET", f"{base}/tags/v1.0.0")
+        _, existing = gh.request("GET", f"{base}/tags/{tag}")
     except RuntimeError:
-        pass  # 404: release does not exist yet
+        pass  # 404: this version has no release yet; older tags are left untouched
 
     if existing:
         release_id = existing["id"]
-        gh.request("PATCH", f"{base}/{release_id}", {"body": body, "name": "System Assistant v1.0.0"})
+        gh.request("PATCH", f"{base}/{release_id}", {"body": body, "name": title})
         # Re-uploading an asset with the same name returns 422, so clear old ones first.
         for asset in existing.get("assets", []):
             gh.request("DELETE", f"{base}/assets/{asset['id']}")
             print(f"  Removed stale asset: {asset['name']}")
-        print(f"  Release updated: {existing['html_url']}")
+        html_url = existing["html_url"]
+        print(f"  Release updated: {html_url}")
     else:
         _, created = gh.request("POST", base, {
-            "tag_name": "v1.0.0",
+            "tag_name": tag,
             "target_commitish": branch,
-            "name": "System Assistant v1.0.0",
+            "name": title,
             "body": body,
             "draft": False,
             "prerelease": False,
         })
         release_id = created["id"]
-        print(f"  Release created: {created['html_url']}")
+        html_url = created["html_url"]
+        print(f"  Release created: {html_url}")
 
-    candidates = sorted(artifacts.glob("*.zip")) + sorted(artifacts.glob("SystemAssistant-Setup-*.exe"))
+    # Only this version's installer is attached (older setup exe files stay local).
+    candidates = sorted(artifacts.glob("*.zip"))
+    setup = artifacts / setup_name
+    if setup.is_file():
+        candidates.append(setup)
+    else:
+        print(f"  Warning: {setup_name} not found, skipping installer asset")
     if not candidates:
         print("  Warning: no artifacts found, release has no binaries")
-        return existing["html_url"] if existing else ""
+        return html_url
 
     for archive in candidates:
         name = archive.name
@@ -222,7 +258,7 @@ def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path, branch: s
         content_type = "application/zip" if archive.suffix.lower() == ".zip" else "application/octet-stream"
         gh.request("POST", url, raw=archive.read_bytes(), content_type=content_type)
         print(f"  Uploaded {name} ({archive.stat().st_size / 1024 / 1024:.1f} MB)")
-    return existing["html_url"] if existing else f"https://github.com/{owner}/{repo}/releases/tag/v1.0.0"
+    return html_url
 
 
 def main() -> int:
@@ -237,10 +273,15 @@ def main() -> int:
     parser.add_argument("--source", default=str(Path(__file__).resolve().parent.parent))
     parser.add_argument("--artifacts", default="", help="Directory containing release zip files")
     parser.add_argument("--no-release", action="store_true")
-    parser.add_argument("--message", default="feat: System Assistant v1.0.0")
+    parser.add_argument("--version", default="",
+                        help="Release version / tag (default: <Version> in Directory.Build.props)")
+    parser.add_argument("--message", default="",
+                        help="Commit message (default: chore: release vX.Y.Z)")
     args = parser.parse_args()
 
     root = Path(args.source).resolve()
+    version = (args.version or "").strip() or read_project_version(root)
+    message = args.message or f"chore: release v{version}"
     token_file = Path(args.token_file).resolve() if args.token_file else root / ".github_token"
     token = (args.token or "").strip()
     if not token and token_file.is_file():
@@ -268,14 +309,14 @@ def main() -> int:
         print(f"ERROR: authentication failed: {error}", file=sys.stderr)
         return 1
 
-    print(f"Publishing to https://github.com/{owner}/{args.repo} ({args.visibility})")
+    print(f"Publishing v{version} to https://github.com/{owner}/{args.repo} ({args.visibility})")
     try:
         branch = create_or_get_repo(gh, owner, args.repo, args.visibility == "private",
                                     "Windows hardware monitor, safe cleanup and system toolkit "
                                     "built with C# .NET 9 + Avalonia UI")
-        push_tree(gh, owner, args.repo, root, branch, args.message)
+        push_tree(gh, owner, args.repo, root, branch, message)
         if not args.no_release:
-            create_release(gh, owner, args.repo, artifacts, branch, root)
+            create_release(gh, owner, args.repo, artifacts, branch, root, version)
     except RuntimeError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

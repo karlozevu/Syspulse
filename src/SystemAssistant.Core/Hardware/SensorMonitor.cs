@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using LibreHardwareMonitor.Hardware;
 using SystemAssistant.Core.Interfaces;
 using SystemAssistant.Models.Hardware;
+using SystemAssistant.Utils.Windows;
 
 namespace SystemAssistant.Core.Hardware;
 
@@ -20,6 +21,14 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     private IReadOnlyList<SensorThreshold> _thresholds = Array.Empty<SensorThreshold>();
     private IReadOnlyList<SensorReading> _latest = Array.Empty<SensorReading>();
     private readonly TimeSpan _alertCooldown = TimeSpan.FromMinutes(2);
+
+    // LHM 不可用时的降级读数使用固定标识，保证曲线连续、LatestReadings 恒含 CPU / 内存两项
+    private const string NativeCpuIdentifier = "native/cpu/load";
+    private const string NativeMemoryIdentifier = "native/memory/load";
+
+    // GetSystemTimes 首次 / 偶发失败时沿用上一次有效值，避免快照出现空白（仅后台工作线程读写）
+    private double _lastCpuUsage;
+    private bool _hasCpuSample;
 
     public event Action<SensorSnapshot>? SnapshotUpdated;
     public event Action<ThresholdAlert>? ThresholdExceeded;
@@ -75,6 +84,12 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         try
         {
             OpenComputer();
+            // 预热 GetSystemTimes 基准：该方法首次调用只记录采样、返回 null，
+            // 之后每个周期的差值才是真实 CPU 占用；预热后首个周期就能给出有效数值。
+            var warmup = WindowsNativeInfo.GetCpuUsagePercent();
+            if (warmup is not null) { _lastCpuUsage = warmup.Value; _hasCpuSample = true; }
+            // 立即推送首个快照，不等待第一个计时周期，确保启动后很快就有数据
+            CollectOnce();
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000)));
             while (await timer.WaitForNextTickAsync(token))
             {
@@ -158,61 +173,128 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         }
     }
 
+    /// <summary>
+    /// 执行一次采集。无论 LibreHardwareMonitor（Ring0 驱动）是否可用，都会构造并推送快照：
+    /// CPU / 内存占用始终由 Win32 API 提供（普通权限可用），LHM 只负责温度 / 风扇 / 电压等附加读数。
+    /// 这样实时曲线、传感器计数、阈值告警在任何权限下都能工作，不会因 LHM 初始化失败而全线空白。
+    /// </summary>
     private void CollectOnce()
     {
         Computer? computer;
         lock (_sync) computer = _computer;
-        if (computer is null)
-        {
-            OpenComputer();
-            lock (_sync) computer = _computer;
-            if (computer is null) return;
-        }
 
         var readings = new List<SensorReading>();
-        try
+        string? degradedError = null;
+
+        if (computer is not null)
         {
-            foreach (var hardware in computer.Hardware)
+            try
             {
-                try { hardware.Update(); } catch { continue; }
-                AddSensors(readings, hardware.HardwareType.ToString(), hardware.Sensors);
-                foreach (var subHardware in hardware.SubHardware)
+                foreach (var hardware in computer.Hardware)
                 {
-                    try { subHardware.Update(); } catch { continue; }
-                    AddSensors(readings, hardware.HardwareType.ToString(), subHardware.Sensors);
+                    try { hardware.Update(); } catch { continue; }
+                    AddSensors(readings, hardware.HardwareType.ToString(), hardware.Sensors);
+                    foreach (var subHardware in hardware.SubHardware)
+                    {
+                        try { subHardware.Update(); } catch { continue; }
+                        AddSensors(readings, hardware.HardwareType.ToString(), subHardware.Sensors);
+                    }
                 }
             }
-            LastError = string.Empty;
+            catch (Exception ex)
+            {
+                // 单次 LHM 读取失败只记录原因，不阻断本轮 Win32 基础快照的推送
+                degradedError = "传感器读取中断：" + ex.Message;
+            }
         }
-        catch (Exception ex)
+        else
         {
-            LastError = "传感器读取中断：" + ex.Message;
-            return;
+            // LHM 不可用：沿用 OpenComputer 写入的初始化失败原因（若为空则给出降级说明）
+            degradedError = string.IsNullOrWhiteSpace(LastError)
+                ? "硬件传感器不可用（可能需要管理员权限），已降级为 Win32 基础监控（CPU / 内存）"
+                : LastError;
         }
+
+        // Win32 基础指标：普通权限即可读取，是快照的权威数据来源，绝不依赖 LHM
+        var cpuSample = WindowsNativeInfo.GetCpuUsagePercent();
+        if (cpuSample is not null) { _lastCpuUsage = cpuSample.Value; _hasCpuSample = true; }
+        else if (!_hasCpuSample) { _lastCpuUsage = ReadCpuUsageFromWmi(); _hasCpuSample = true; }
+        var cpuUsage = Math.Clamp(_lastCpuUsage, 0, 100);
+        var memoryUsage = ReadMemoryUsagePercent();
+
+        // 缺少 LHM 的 CPU / 内存负载读数时补上 Win32 原生读数，
+        // 保证 LatestReadings 至少有 CPU 与内存两条，且曲线标识稳定连续。
+        EnsureNativeLoadReadings(readings, cpuUsage, memoryUsage);
 
         var now = DateTime.Now;
         foreach (var reading in readings) reading.Timestamp = now;
-        Volatile.Write(ref _latest, readings);
-        History.Add(readings);
+        // LatestReadings 与事件载荷共用同一份数组快照：早先直接暴露可变 List，
+        // 界面在 Stop/Dispose 之后可能读到空集合，导致 CPU 温度等派生字段恒为 N/A。
+        var snapshotReadings = readings.ToArray();
+        Volatile.Write(ref _latest, snapshotReadings);
+        History.Add(snapshotReadings);
 
-        double? cpuUsage = null;
-        double? memoryUsage = null;
-        var cpuLoads = readings.Where(r => r.Kind == SensorKind.Load
-            && r.Name.Contains("CPU Total", StringComparison.OrdinalIgnoreCase)).Select(r => r.Value).ToList();
-        if (cpuLoads.Count > 0) cpuUsage = cpuLoads.Average();
-        var memoryLoads = readings.Where(r => r.Kind == SensorKind.Load
-            && r.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase)).Select(r => r.Value).ToList();
-        if (memoryLoads.Count > 0) memoryUsage = memoryLoads.Average();
+        // 失败原因只记录、不阻断快照推送
+        LastError = degradedError ?? string.Empty;
 
         var snapshot = new SensorSnapshot
         {
             Timestamp = now,
-            Readings = readings.ToArray(),
+            Readings = snapshotReadings,
             CpuUsagePercent = cpuUsage,
             MemoryUsagePercent = memoryUsage
         };
         RaiseSnapshotUpdated(snapshot);
         CheckThresholds(readings, now);
+    }
+
+    /// <summary>由 GlobalMemoryStatusEx 计算物理内存占用百分比（0~100）。</summary>
+    private static double ReadMemoryUsagePercent()
+    {
+        var (totalPhys, availablePhys, _, _) = WindowsNativeInfo.GetMemoryStatus();
+        if (totalPhys <= 0) return 0;
+        return Math.Clamp((1 - availablePhys * 1.0 / totalPhys) * 100, 0, 100);
+    }
+
+    /// <summary>
+    /// GetSystemTimes 尚未建立基准或不可用时，回落到 WMI 的 LoadPercentage（普通权限可读），
+    /// 避免首个快照出现 CPU 恒 0。
+    /// </summary>
+    private static double ReadCpuUsageFromWmi()
+        => Math.Clamp(WmiQuery.First(WmiQuery.CimV2, "Win32_Processor")?.Double("LoadPercentage") ?? 0, 0, 100);
+
+    /// <summary>
+    /// 若本轮没有 LHM 的 CPU Total / Memory 负载读数，就补上 Win32 原生读数。
+    /// 固定 Identifier 保证 SensorHistory 曲线连续、LatestReadings 恒含 CPU / 内存两项。
+    /// </summary>
+    private static void EnsureNativeLoadReadings(List<SensorReading> readings, double cpuUsage, double memoryUsage)
+    {
+        if (!readings.Any(r => r.Kind == SensorKind.Load
+            && r.Name.Contains("CPU Total", StringComparison.OrdinalIgnoreCase)))
+        {
+            readings.Add(new SensorReading
+            {
+                Identifier = NativeCpuIdentifier,
+                Name = "CPU Total",
+                HardwareName = "CPU",
+                Kind = SensorKind.Load,
+                Unit = "%",
+                Value = cpuUsage
+            });
+        }
+        if (!readings.Any(r => r.Kind == SensorKind.Load
+            && r.Name.Contains("Memory", StringComparison.OrdinalIgnoreCase)))
+        {
+            readings.Add(new SensorReading
+            {
+                Identifier = NativeMemoryIdentifier,
+                Name = "Memory",
+                HardwareName = "Memory",
+                Kind = SensorKind.Load,
+                Unit = "%",
+                Value = memoryUsage
+            });
+        }
     }
 
     /// <summary>逐个订阅者调用快照事件，订阅者异常不会终止采集循环。</summary>

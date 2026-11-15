@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using System.Text;
 using SystemAssistant.Utils.Diagnostics;
 using SystemAssistant.Utils.IO;
@@ -11,7 +12,10 @@ public sealed class RegistryBackupResult
     public string Directory { get; init; } = string.Empty;
     public string ManifestPath { get; init; } = string.Empty;
     public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+    /// <summary>阻断性失败（权限不足、reg.exe 不可用等），会导致 Success=false。</summary>
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
+    /// <summary>可预期的跳过（目标键本就不存在），不影响 Success。</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -38,6 +42,7 @@ public static class RegistryBackupHelper
         IEnumerable<string>? keys, string targetDirectory, CancellationToken token = default)
     {
         var errors = new List<string>();
+        var warnings = new List<string>();
         var files = new List<string>();
         string directory;
         try
@@ -58,8 +63,20 @@ public static class RegistryBackupHelper
             var fileName = $"{index:00}_{ExportHelper.SanitizeFileName(key.Replace('\\', '_'))}.reg";
             var output = Path.Combine(directory, fileName);
             var result = await CommandRunner.RunQuickAsync("reg.exe", $"export \"{key}\" \"{output}\" /y", token);
-            if (result.Succeeded && File.Exists(output)) files.Add(output);
-            else errors.Add($"{key}：{(string.IsNullOrWhiteSpace(result.StandardError) ? "reg.exe 导出失败或未生成文件" : result.StandardError.Trim())}");
+            if (result.Succeeded && File.Exists(output))
+            {
+                files.Add(output);
+                continue;
+            }
+            var reason = string.IsNullOrWhiteSpace(result.StandardError)
+                ? "reg.exe 导出失败或未生成文件"
+                : result.StandardError.Trim();
+            var detail = $"{key}：{reason}";
+            // 「目标键不存在」是常见且可预期的情况（32/64 位视图差异、从未安装过相关软件等），
+            // 记为警告而非阻断性错误；权限不足、reg.exe 被策略拦截等仍为错误。
+            // 避免单个无关键把整个备份判为失败，进而永久阻断注册表删除。
+            if (!KeyExists(key)) warnings.Add(detail + "（目标键不存在，已跳过）");
+            else errors.Add(detail);
         }
 
         var manifest = Path.Combine(directory, "RESTORE_README.txt");
@@ -71,23 +88,55 @@ public static class RegistryBackupHelper
         foreach (var file in files) builder.AppendLine($"    reg import \"{file}\"");
         builder.AppendLine();
         builder.AppendLine("注意：导入整个 Classes 键会覆盖此后新建的文件关联，请仅在确认需要时执行。");
+        if (warnings.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine("以下键未导出（目标键不存在，可忽略）：");
+            foreach (var warning in warnings) builder.AppendLine("    " + warning);
+        }
         if (errors.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("以下键导出失败（可能不存在或无权限）：");
+            builder.AppendLine("以下键导出失败（权限不足或 reg.exe 不可用，属于阻断性错误）：");
             foreach (var error in errors) builder.AppendLine("    " + error);
         }
         ExportHelper.WriteText(manifest, builder.ToString());
 
         return new RegistryBackupResult
         {
-            // 只要有一个键导出失败就不能视为备份成功：注册表删除的前置条件必须是完整备份。
-            // 失败键明细通过 Errors 一并返回给调用方展示。
+            // 成功条件：至少成功导出一个键，且不存在阻断性错误（Errors）。
+            // 「键不存在」已归入 Warnings，不再因为单个无关键把整体判为失败；
+            // 失败 / 跳过明细分别通过 Errors / Warnings 回传给调用方展示。
             Success = files.Count > 0 && errors.Count == 0,
             Directory = directory,
             ManifestPath = manifest,
             Files = files,
-            Errors = errors
+            Errors = errors,
+            Warnings = warnings
         };
+    }
+
+    /// <summary>
+    /// 用只读方式判断目标键是否真实存在，用于把「键不存在」与「权限 / reg.exe 不可用」区分开。
+    /// 无法判断时按「可能存在」处理（返回 true），避免把权限问题误归类为可忽略的警告。
+    /// </summary>
+    private static bool KeyExists(string fullKey)
+    {
+        var parts = fullKey.Split('\\', 2);
+        if (parts.Length < 2) return false;
+        RegistryHive hive;
+        if (parts[0].Equals("HKLM", StringComparison.OrdinalIgnoreCase)) hive = RegistryHive.LocalMachine;
+        else if (parts[0].Equals("HKCU", StringComparison.OrdinalIgnoreCase)) hive = RegistryHive.CurrentUser;
+        else return false;
+        try
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
+            using var key = baseKey.OpenSubKey(parts[1]);
+            return key is not null;
+        }
+        catch
+        {
+            return true;
+        }
     }
 }

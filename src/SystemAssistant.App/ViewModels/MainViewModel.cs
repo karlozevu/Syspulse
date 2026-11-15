@@ -1,4 +1,6 @@
 using System.Windows.Input;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using SystemAssistant.App.Mvvm;
 using SystemAssistant.App.Services;
@@ -82,7 +84,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (PrivilegeHelper.IsAdministrator) return;
             // 状态栏绑定的是 GlobalStatus，写 StatusMessage 用户永远看不到。
-            if (!DialogService.Elevate()) GlobalStatus = L("Status_UacCancelled");
+            if (!DialogService.Elevate())
+            {
+                GlobalStatus = L("Status_UacCancelled");
+                return;
+            }
+            // UAC 已同意且管理员新进程已启动：立即关闭当前这个非管理员实例。
+            // 否则会留下一个所有管理员按钮都灰着、还得用户手动关掉的旧窗口。
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.Shutdown(0);
+            else
+                Environment.Exit(0);
         });
         OpenDashboardCommand = new RelayCommand(() =>
         {
@@ -221,7 +233,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void UpdateGlobalStatus()
     {
-        var admin = PrivilegeHelper.IsAdministrator ? L("Common_AdminOk") : L("Common_AdminRequired");
+        // 状态栏只显示中性的权限状态；Common_AdminRequired 是操作被拒时的错误提示，
+        // 放在这里会让人误以为某个功能一直处于失败状态。
+        var admin = PrivilegeHelper.IsAdministrator ? L("Common_AdminOk") : L("Common_PermissionStandard");
         // 版本 + 权限始终可见，更新检测结果作为附加信息，不覆盖权限状态。
         GlobalStatus = string.IsNullOrWhiteSpace(_updateNote)
             ? $"v{Services.Update.CurrentVersion} · {admin}"

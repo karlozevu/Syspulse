@@ -98,6 +98,10 @@ public sealed class CleanService : ICleanService
         if (IsAnyBrowserRunning())
             warnings.Add("检测到浏览器正在运行，相关缓存文件可能被占用而删除失败，建议先关闭浏览器。");
 
+        // 白名单规则异常 / 正则超时会保守跳过条目，把规则提示带进 Warnings，
+        // 避免整次扫描结果为空却没有任何原因说明。
+        warnings.AddRange(whitelist.LastWarnings);
+
         status?.Report($"扫描完成：共 {distinct.Length} 项");
         return new ScanResult
         {
@@ -199,15 +203,27 @@ public sealed class CleanService : ICleanService
     {
         var result = await RegistryBackupHelper.BackupAsync(RegistryBackupHelper.DefaultKeys, directory, token);
         _registryBackupDone = result.Success;
+
+        // 备份未完成时给出明确、真实的原因，避免上层把「备份不完整 / reg.exe 不可用」
+        // 笼统地误判为「需要管理员权限」。
+        var messages = new List<string>(result.Errors);
+        if (!result.Success)
+        {
+            messages.Insert(0, result.Files.Count == 0
+                ? "注册表备份未完成：没有任何键成功导出，已禁止注册表删除（请检查备份目录是否可写、reg.exe 是否可用）"
+                : $"注册表备份不完整：成功导出 {result.Files.Count} 个键，但仍有 {result.Errors.Count} 个键导出失败，已禁止注册表删除");
+        }
+
         _log.Log(OperationType.Registry, "注册表备份",
             $"目录 {result.Directory}，成功导出 {result.Files.Count} 个键", result.Success,
-            result.Success ? null : string.Join("；", result.Errors));
+            result.Success ? null : string.Join("；", messages));
         return new RegistryBackupResultHolder
         {
             Success = result.Success,
             Directory = result.Directory,
             ManifestPath = result.ManifestPath,
-            Errors = result.Errors
+            Errors = messages,
+            Warnings = result.Warnings
         };
     }
 

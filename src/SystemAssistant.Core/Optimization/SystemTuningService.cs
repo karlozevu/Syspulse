@@ -31,20 +31,6 @@ public sealed class SystemTuningService : ISystemTuningService
         },
         new TuningItem
         {
-            Id = "telemetry",
-            Name = "Windows 遥测数据上报",
-            Description = "通过策略项 AllowTelemetry 控制诊断数据级别（0 = 关闭，1 = 基本）。",
-            RiskText = "中风险：修改组策略项，企业托管设备可能由组织策略覆盖；部分功能依赖诊断数据。",
-            Risk = TuningRisk.Dangerous,
-            RegistryPath = @"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
-            ValueName = "AllowTelemetry",
-            Hive = TuningRegistryHive.LocalMachine,
-            DefaultValue = 1,
-            EnabledValue = 1,
-            DisabledValue = 0
-        },
-        new TuningItem
-        {
             Id = "suggestions",
             Name = "开始菜单应用建议 / 广告推送",
             Description = "关闭开始菜单中的应用推荐与建议内容。",

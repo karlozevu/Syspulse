@@ -17,6 +17,10 @@ namespace SystemAssistant.Core.Interfaces;
 public interface ISettingsService
 {
     AppSettings Current { get; }
+
+    /// <summary>设置成功写回（Update / Reload）后触发，供 UI 同步白名单与自定义路径。</summary>
+    event Action? Changed;
+
     void Update(Action<AppSettings> change);
     void Reload();
 }
@@ -85,7 +89,10 @@ public sealed class RegistryBackupResultHolder
     public bool Success { get; init; }
     public string Directory { get; init; } = string.Empty;
     public string ManifestPath { get; init; } = string.Empty;
+    /// <summary>明确的失败原因（非权限导向的笼统提示），供界面展示真实情况。</summary>
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
+    /// <summary>可预期的跳过提示（例如目标键不存在），不影响 Success。</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>开机启动项管理。</summary>

@@ -143,12 +143,11 @@ public sealed class HardwareViewModel : ViewModelBase
             : string.Join("；", o.Memory.Modules.Select(m =>
                 $"{m.Slot}: {m.Manufacturer} {FormatHelper.FormatBytes(m.CapacityBytes)} @ {m.SpeedMHz} MHz"));
 
+        // 已用显存 / 负载 / 核心温度在多数机器上恒为 N/A（显存总量还受 uint32 截断），
+        // 组合文本只保留型号与显存总量，并标注容量来自 WMI、可能受 32 位上限限制。
         GpuList = o.Gpus.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine + Environment.NewLine,
             o.Gpus.Select(g => $"{g.Name}{Environment.NewLine}" +
-                $"  {L("Hardware_GpuVram")}: {FormatHelper.FormatBytes(g.VramTotalBytes)} / " +
-                $"{L("Hardware_GpuVramUsed")}: {(g.VramUsedBytes.HasValue ? FormatHelper.FormatBytes(g.VramUsedBytes.Value) : L("Common_NA"))} / " +
-                $"{L("Hardware_GpuLoad")}: {(g.LoadPercent.HasValue ? $"{g.LoadPercent:F1} %" : L("Common_NA"))} / " +
-                $"{L("Hardware_GpuTemp")}: {(g.TemperatureCelsius.HasValue ? $"{g.TemperatureCelsius:F1} °C" : L("Common_NA"))}"));
+                $"  {L("Hardware_GpuVram")}: {FormatHelper.FormatBytes(g.VramTotalBytes)} {L("Hardware_GpuVramNote")}"));
 
         DiskList = o.Disks.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine + Environment.NewLine,
             o.Disks.Select(d => $"[{d.MediaTypeText}] {L("Label_Disk")} {d.DiskIndex} {d.Model}  " +
@@ -189,6 +188,18 @@ public sealed class HardwareViewModel : ViewModelBase
                 .Select(g => g.First())
                 .Take(6)
                 .ToList();
+
+            // 驱动完全不可用、没有温度/风扇/电压读数时，用 Win32 的 CPU / 内存负载曲线兜底，
+            // 保证实时面板在任何权限下都有可见数据，而不是一片空白。
+            if (preferred.Count == 0)
+            {
+                preferred = snapshot.Readings
+                    .Where(r => r.Kind == SensorKind.Load)
+                    .GroupBy(r => r.Identifier)
+                    .Select(g => g.First())
+                    .Take(2)
+                    .ToList();
+            }
 
             var charts = new List<SensorChartVm>();
             for (var i = 0; i < preferred.Count; i++)

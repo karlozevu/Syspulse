@@ -25,9 +25,10 @@ public static partial class PageViewLocator
         left.Children.Add(UiFactory.BoundCheck("Cleaner_AppCache", vm, nameof(CleanerViewModel.ScanApplicationCache)));
         left.Children.Add(UiFactory.BoundCheck("Cleaner_Registry", vm, nameof(CleanerViewModel.ScanRegistryResidue)));
         var right = new StackPanel { Spacing = 6 };
+        // 下载记录与历史记录共用同一个 SQLite 库，ScanProviders 已合并进 BrowserHistory 分组，
+        // 独立的「扫描下载记录」复选框永远不会产生对应结果，已移除（文案见 Cleaner_History）。
         right.Children.Add(UiFactory.BoundCheck("Cleaner_History", vm, nameof(CleanerViewModel.ScanBrowserHistory)));
         right.Children.Add(UiFactory.BoundCheck("Cleaner_Cookies", vm, nameof(CleanerViewModel.ScanBrowserCookies)));
-        right.Children.Add(UiFactory.BoundCheck("Cleaner_Downloads", vm, nameof(CleanerViewModel.ScanBrowserDownloads)));
         Grid.SetColumn(left, 0);
         Grid.SetColumn(right, 1);
         options.Children.Add(left);
@@ -37,6 +38,7 @@ public static partial class PageViewLocator
             UiFactory.Button("Cleaner_Scan", vm.ScanCommand, accent: true),
             UiFactory.Button("Cleaner_Execute", vm.CleanCommand, variant: ButtonVariant.Danger),
             UiFactory.Button("Cleaner_Backup", vm.BackupRegistryCommand),
+            UiFactory.Button("Common_SelectAll", vm.SelectAllCommand),
             UiFactory.Button("Common_UnselectAll", vm.SelectNoneCommand));
 
         var groupsPanel = new StackPanel { Spacing = 8 };
@@ -115,6 +117,9 @@ public static partial class PageViewLocator
         {
             if (item is StartupItem startup) SystemAssistant.Utils.IO.FileSystemHelper.OpenInExplorer(startup.Command);
         };
+        // 页面按 ViewModel 缓存，构造函数里的异步加载可能早于订阅完成：
+        // 先用当前值初始化一次，再订阅后续变更。
+        startupTable.SetItems(vm.StartupItems);
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(OptimizationViewModel.StartupItems))
@@ -144,6 +149,8 @@ public static partial class PageViewLocator
             Col("Common_Risk", 280, o => ((WindowsServiceInfo)o).IsHighRisk ? LocalizationService.Instance.Get("Optimize_HighRiskService") : string.Empty, stretch: true)
         });
         serviceTable.SelectionChanged += item => vm.SelectedService = item as WindowsServiceInfo;
+        // 同上：先用当前值初始化表格，避免缓存页面首次进入空白。
+        serviceTable.SetItems(vm.ServicesList);
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(OptimizationViewModel.ServicesList))
@@ -235,12 +242,13 @@ public static partial class PageViewLocator
         var pingHost = UiFactory.BoundInput(vm, nameof(OptimizationViewModel.PingHost));
         pingHost.Width = 220;
         var pingResult = UiFactory.BoundText(vm, nameof(OptimizationViewModel.PingResult));
-        var networkButtons = UiFactory.Toolbar(
-            UiFactory.Button("Optimize_FlushDns", vm.FlushDnsCommand),
-            UiFactory.Button("Optimize_ResetWinsock", vm.ResetWinsockCommand),
-            UiFactory.Button("Optimize_ResetTcpIp", vm.ResetTcpIpCommand));
-        // 与服务 / 修复 / 磁盘维护页保持一致：非管理员禁用需要提权的网络重置命令。
-        foreach (var button in networkButtons.Children.OfType<Button>()) button.IsEnabled = vm.IsAdministrator;
+        // 刷新 DNS 不需要管理员，保持可用；仅 Winsock / TCP-IP 重置需要提权。
+        var flushDnsButton = UiFactory.Button("Optimize_FlushDns", vm.FlushDnsCommand);
+        var resetWinsockButton = UiFactory.Button("Optimize_ResetWinsock", vm.ResetWinsockCommand);
+        var resetTcpIpButton = UiFactory.Button("Optimize_ResetTcpIp", vm.ResetTcpIpCommand);
+        var networkButtons = UiFactory.Toolbar(flushDnsButton, resetWinsockButton, resetTcpIpButton);
+        resetWinsockButton.IsEnabled = vm.IsAdministrator;
+        resetTcpIpButton.IsEnabled = vm.IsAdministrator;
         var network = new StackPanel
         {
             Children =

@@ -27,19 +27,22 @@ public sealed class CleanerViewModel : ViewModelBase
     private string _progressText = string.Empty;
     private string _warningText = string.Empty;
     private bool _hasResult;
+    private string _lastRegistryBackupError = string.Empty;
 
     public CleanerViewModel()
     {
-        var settings = Services.Settings.Current;
-        _customPathsText = string.Join(Environment.NewLine, settings.CustomScanPaths);
-        _whitelistText = string.Join(Environment.NewLine, settings.Whitelist.Select(r => r.Pattern));
+        ReloadTextFields();
 
         ScanCommand = CreateCommand(ScanAsync, () => !IsBusy);
         CleanCommand = CreateCommand(CleanAsync, () => !IsBusy && HasResult);
         BackupRegistryCommand = CreateCommand(BackupRegistryAsync, () => !IsBusy);
         AddCustomPathCommand = CreateCommand(AddCustomPathAsync);
         SaveWhitelistCommand = new RelayCommand(SaveWhitelist);
+        SelectAllCommand = new RelayCommand(() => SetAll(true));
         SelectNoneCommand = new RelayCommand(() => SetAll(false));
+
+        // 设置页与清理页共享同一份配置，任一处保存后都刷新本页文本，避免后保存的覆盖先保存的。
+        Services.Settings.Changed += OnSettingsChanged;
     }
 
     public event Action? GroupsChanged;
@@ -49,6 +52,7 @@ public sealed class CleanerViewModel : ViewModelBase
     public ICommand BackupRegistryCommand { get; }
     public ICommand AddCustomPathCommand { get; }
     public ICommand SaveWhitelistCommand { get; }
+    public ICommand SelectAllCommand { get; }
     public ICommand SelectNoneCommand { get; }
 
     public IReadOnlyList<ScanGroup> Groups
@@ -119,10 +123,14 @@ public sealed class CleanerViewModel : ViewModelBase
             var proceed = await DialogService.ConfirmAsync(L("Cleaner_ConfirmTitle"),
                 L("Cleaner_BackupRequired") + " " + L("Cleaner_BackupHint"));
             if (!proceed) return;
+            _lastRegistryBackupError = string.Empty;
             await BackupRegistryAsync();
             if (!Services.CleanService.RegistryBackupDone)
             {
-                StatusMessage = L("Common_AdminRequired");
+                // 显示 RegistryBackupResultHolder.Errors 的真实原因，不再笼统提示权限不足。
+                StatusMessage = string.IsNullOrWhiteSpace(_lastRegistryBackupError)
+                    ? L("Common_AdminRequired")
+                    : _lastRegistryBackupError;
                 return;
             }
         }
@@ -178,9 +186,11 @@ public sealed class CleanerViewModel : ViewModelBase
         await RunBusyAsync(async () =>
         {
             var result = await Services.Clean.BackupRegistryAsync(directory);
+            _lastRegistryBackupError = result.Success ? string.Empty : string.Join("；", result.Errors);
             StatusMessage = result.Success
                 ? L("Cleaner_BackupHint") + " → " + result.ManifestPath
-                : string.Join("；", result.Errors);
+                : (string.IsNullOrWhiteSpace(_lastRegistryBackupError)
+                    ? L("Common_AdminRequired") : _lastRegistryBackupError);
             Raise(nameof(RegistryBackupDone));
             if (!result.Success) await DialogService.ErrorAsync(StatusMessage);
         }, L("Cleaner_Backup"));
@@ -218,6 +228,31 @@ public sealed class CleanerViewModel : ViewModelBase
     {
         foreach (var item in Groups.SelectMany(g => g.Items)) item.IsChecked = value;
         GroupsChanged?.Invoke();
+    }
+
+    /// <summary>从共享设置重新加载文本字段；值相同则不更新，避免自己保存触发的回环。</summary>
+    private bool ReloadTextFields()
+    {
+        var settings = Services.Settings.Current;
+        var customPaths = string.Join(Environment.NewLine, settings.CustomScanPaths);
+        var whitelist = string.Join(Environment.NewLine, settings.Whitelist.Select(r => r.Pattern));
+        var changed = false;
+        if (!string.Equals(_customPathsText, customPaths, StringComparison.Ordinal))
+        { _customPathsText = customPaths; changed = true; }
+        if (!string.Equals(_whitelistText, whitelist, StringComparison.Ordinal))
+        { _whitelistText = whitelist; changed = true; }
+        return changed;
+    }
+
+    private void OnSettingsChanged()
+    {
+        if (ReloadTextFields()) RaiseAll();
+    }
+
+    public override void Dispose()
+    {
+        Services.Settings.Changed -= OnSettingsChanged;
+        base.Dispose();
     }
 
     private static IReadOnlyList<string> ParseLines(string text)

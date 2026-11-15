@@ -1,6 +1,8 @@
 # System Assistant 复检与优化报告
 
 复检日期：2026-11-15 · 范围：四层全部源码（Models / Utils / Core / App）、构建脚本、发布产物
+
+> 后续又做了一轮全功能实测与修复，见 [FUNCTIONAL-TEST.md](FUNCTIONAL-TEST.md)；本文记录的是第一轮静态复检。
 方法：Release 全量编译、两份独立静态代码审查（业务层 / UI 层逐文件）、启动冒烟测试、安装包静默安装与卸载演练
 
 ---
@@ -93,7 +95,7 @@
 | --- | --- |
 | 源码编译 | Release 0 错误 0 警告（四层 + 安装包脚本） |
 | 便携版 | 框架依赖单文件 exe + zip；自包含单文件 exe + zip（免装 .NET 运行时） |
-| 安装包 | `artifacts/SystemAssistant-Setup-1.0.0.exe`，Inno Setup 6，免 UAC，含安装向导、开始菜单/桌面快捷方式、卸载程序与 HKCU 卸载信息；静默安装→卸载演练通过，用户数据目录保持不变 |
+| 安装包 | `artifacts/SystemAssistant-Setup-1.1.0.exe`，Inno Setup 6，免 UAC，含安装向导、开始菜单/桌面快捷方式、卸载程序与 HKCU 卸载信息；静默安装→卸载演练通过，用户数据目录保持不变 |
 | 冒烟测试 | 普通构建与自包含 exe 启动无崩溃、无 stderr、诊断日志为空 |
 
-> 说明：本次修订已同步到 GitHub 仓库 `karlozevu/System-Assistant` 的 `main` 分支；v1.0.0 Release 附件已替换为最新便携版，并新增 Windows 安装程序。复检报告、安装包脚本与应用图标源文件均随源码一起发布。
+> 说明：以上修订已同步到 GitHub 仓库 `karlozevu/System-Assistant`；`v1.0.0` 为初版发布，全部修订内容随 `v1.1.0` 正式发布。复检报告、安装包脚本与应用图标源文件均随源码一起发布。

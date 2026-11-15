@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 独立的功能回归探针：不加入解决方案，不影响主程序构建 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SystemAssistant.FunctionalProbe</AssemblyName>
+    <RootNamespace>SystemAssistant.FunctionalProbe</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SystemAssistant.Core/SystemAssistant.Core.csproj" />
+    <ProjectReference Include="../../src/SystemAssistant.Utils/SystemAssistant.Utils.csproj" />
+    <ProjectReference Include="../../src/SystemAssistant.Models/SystemAssistant.Models.csproj" />
+  </ItemGroup>
+</Project>

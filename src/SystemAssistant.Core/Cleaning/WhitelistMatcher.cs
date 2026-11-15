@@ -15,6 +15,8 @@ public sealed class WhitelistMatcher
     private static readonly ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.Ordinal);
 
     private readonly IReadOnlyList<WhitelistRule> _rules;
+    private readonly object _warningSync = new();
+    private readonly List<string> _warnings = new();
     private int _skippedCount;
 
     public WhitelistMatcher(IEnumerable<WhitelistRule>? rules)
@@ -27,7 +29,29 @@ public sealed class WhitelistMatcher
     /// <summary>本次扫描中被白名单跳过的条目数。</summary>
     public int SkippedCount => Volatile.Read(ref _skippedCount);
 
-    public void ResetCounter() => Interlocked.Exchange(ref _skippedCount, 0);
+    /// <summary>
+    /// 本次匹配中出现异常 / 正则超时的规则提示（相关条目已保守跳过，不会误删）。
+    /// 供 ScanResult.Warnings 展示，避免整次扫描结果为空却没有任何提示。
+    /// </summary>
+    public IReadOnlyList<string> LastWarnings
+    {
+        get { lock (_warningSync) return _warnings.ToArray(); }
+    }
+
+    public void ResetCounter()
+    {
+        Interlocked.Exchange(ref _skippedCount, 0);
+        lock (_warningSync) _warnings.Clear();
+    }
+
+    private void AddWarning(string pattern, string reason)
+    {
+        lock (_warningSync)
+        {
+            var text = $"白名单规则「{pattern}」{reason}，相关条目已保守跳过（不删除）";
+            if (!_warnings.Contains(text)) _warnings.Add(text);
+        }
+    }
 
     /// <summary>路径是否命中白名单。</summary>
     public bool IsWhitelisted(string path, bool count = true)
@@ -60,6 +84,7 @@ public sealed class WhitelistMatcher
         catch (Exception)
         {
             // 路径解析或匹配异常：保守视为命中白名单，跳过该条目，绝不误删
+            AddWarning("(路径解析)", "匹配时发生异常");
             if (count) Interlocked.Increment(ref _skippedCount);
             return true;
         }
@@ -70,7 +95,7 @@ public sealed class WhitelistMatcher
     /// 绝对模式要求从根开始逐段前缀匹配；相对模式要求按段边界对齐连续匹配。
     /// 这样 "Important" 不会误命中 "ImportantBackup" 这类子串。
     /// </summary>
-    private static bool DirectoryMatch(string path, string pattern)
+    private bool DirectoryMatch(string path, string pattern)
     {
         var pathParts = SplitSegments(path);
         var patternParts = SplitSegments(pattern);
@@ -102,7 +127,7 @@ public sealed class WhitelistMatcher
         path.Replace('/', '\\').Split('\\', StringSplitOptions.RemoveEmptyEntries).ToList();
 
     /// <summary>单段匹配：缓存预编译正则；异常 / 超时保守返回 true（跳过不删）。</summary>
-    private static bool SegmentMatch(string input, string pattern)
+    private bool SegmentMatch(string input, string pattern)
     {
         if (string.IsNullOrEmpty(pattern)) return false;
         if (pattern.IndexOf('*') < 0 && pattern.IndexOf('?') < 0)
@@ -119,9 +144,10 @@ public sealed class WhitelistMatcher
             });
             return regex.IsMatch(input);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // RegexMatchTimeoutException / ArgumentException 等：保守视为命中白名单，跳过不删
+            AddWarning(pattern, ex is RegexMatchTimeoutException ? "正则匹配超时" : "解析 / 匹配失败");
             return true;
         }
     }

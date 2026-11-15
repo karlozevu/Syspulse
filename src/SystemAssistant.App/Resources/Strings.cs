@@ -45,6 +45,7 @@ internal static class Strings
         ["Common_Browse"] = "浏览…",
         ["Common_AdminRequired"] = "权限不足：此功能需要管理员权限",
         ["Common_AdminOk"] = "管理员权限",
+        ["Common_PermissionStandard"] = "标准权限",
         ["Common_Elevate"] = "以管理员身份重启",
         ["Common_Risk"] = "风险提示",
         ["Common_Size"] = "大小",
@@ -177,7 +178,7 @@ internal static class Strings
         ["Cleaner_Subtitle"] = "先扫描 → 逐项勾选 → 二次确认 → 才会删除。默认只勾选低风险项。",
         ["Cleaner_SystemJunk"] = "系统垃圾",
         ["Cleaner_Browser"] = "浏览器缓存",
-        ["Cleaner_History"] = "历史记录",
+        ["Cleaner_History"] = "历史记录（含下载记录）",
         ["Cleaner_Cookies"] = "Cookie",
         ["Cleaner_Downloads"] = "下载记录",
         ["Cleaner_AppCache"] = "应用缓存",
@@ -300,7 +301,12 @@ internal static class Strings
         ["Message_ErrorTitle"] = "操作失败",
         ["Update_Available"] = "发现新版本 {0}，当前版本 {1}",
         ["Update_None"] = "当前已是最新版本（{0}）",
-        ["Update_Info"] = "更新检测：{0}"
+        ["Update_Info"] = "更新检测：{0}",
+        ["Optimize_DiskActionMismatch"] = "「{0}」不适用于当前磁盘介质（{1}），请改用匹配该介质的操作或「仅分析」",
+        ["Status_OpenToolFailed"] = "无法打开该系统工具（可能未安装或权限不足）",
+        ["Hardware_GpuVramNote"] = "（显存容量来自 WMI，可能受 32 位上限限制，仅供参考）",
+        ["Hardware_SensorFallback"] = "硬件传感器驱动不可用，已改用系统 API 显示 CPU / 内存占用",
+        ["Hardware_ThresholdHint"] = "阈值在设置页配置（目前仅温度）"
     };
 
     public static IReadOnlyDictionary<string, string> EnUs { get; } = new Dictionary<string, string>
@@ -342,6 +348,7 @@ internal static class Strings
         ["Common_Browse"] = "Browse...",
         ["Common_AdminRequired"] = "Insufficient rights: administrator privileges required",
         ["Common_AdminOk"] = "Administrator",
+        ["Common_PermissionStandard"] = "Standard user",
         ["Common_Elevate"] = "Restart as administrator",
         ["Common_Risk"] = "Risk notice",
         ["Common_Size"] = "Size",
@@ -474,7 +481,7 @@ internal static class Strings
         ["Cleaner_Subtitle"] = "Scan -> review & tick -> double confirm -> delete. Only low-risk items are ticked by default.",
         ["Cleaner_SystemJunk"] = "System junk",
         ["Cleaner_Browser"] = "Browser cache",
-        ["Cleaner_History"] = "History",
+        ["Cleaner_History"] = "History (incl. downloads)",
         ["Cleaner_Cookies"] = "Cookies",
         ["Cleaner_Downloads"] = "Download records",
         ["Cleaner_AppCache"] = "Application cache",
@@ -597,6 +604,11 @@ internal static class Strings
         ["Message_ErrorTitle"] = "Operation failed",
         ["Update_Available"] = "New version {0} available (current {1})",
         ["Update_None"] = "You are up to date ({0})",
-        ["Update_Info"] = "Update check: {0}"
+        ["Update_Info"] = "Update check: {0}",
+        ["Optimize_DiskActionMismatch"] = "\"{0}\" does not apply to the current disk media ({1}); use the matching action or \"Analyze only\"",
+        ["Status_OpenToolFailed"] = "Could not open the system tool (not installed or insufficient rights)",
+        ["Hardware_GpuVramNote"] = "(VRAM reported by WMI; may be capped by a 32-bit limit, for reference only)",
+        ["Hardware_SensorFallback"] = "Hardware sensor driver unavailable; CPU / memory usage shown via system APIs",
+        ["Hardware_ThresholdHint"] = "Thresholds are configured in Settings (temperature only for now)"
     };
 }

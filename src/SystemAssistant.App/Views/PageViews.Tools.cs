@@ -223,6 +223,9 @@ public static partial class PageViewLocator
                     entry.Detail + Environment.NewLine + entry.ErrorMessage);
         };
         vm.EntriesChanged += () => table.SetItems(vm.Entries);
+        // ViewModel 构造函数里的 Refresh() 早于 View 订阅（页面按 ViewModel 缓存），
+        // 订阅不会回放历史事件，这里用当前值补一次初始填充。
+        table.SetItems(vm.Entries);
 
         var toolbar = UiFactory.Toolbar(
             UiFactory.Button("Common_Refresh", vm.RefreshCommand),

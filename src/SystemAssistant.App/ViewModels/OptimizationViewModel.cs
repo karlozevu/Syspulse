@@ -44,7 +44,11 @@ public sealed class OptimizationViewModel : ViewModelBase
         ResetTcpIpCommand = CreateCommand(ResetTcpIpAsync);
         PingCommand = CreateCommand(PingAsync);
         ToggleTuningCommand = CreateCommand(async p => await ToggleTuningAsync(p));
-        OpenVirtualMemoryCommand = new RelayCommand(() => ShellHelper.OpenSystemTool("virtualmemory"));
+        OpenVirtualMemoryCommand = new RelayCommand(() =>
+        {
+            if (!ShellHelper.OpenSystemTool("virtualmemory"))
+                StatusMessage = L("Status_OpenToolFailed");
+        });
         RefreshTuningCommand = new RelayCommand(LoadTuning);
 
         LoadTuning();
@@ -201,6 +205,20 @@ public sealed class OptimizationViewModel : ViewModelBase
         var disk = SelectedDisk;
         var drive = disk.Partitions.FirstOrDefault()?.DriveLetter.FirstOrDefault() ?? 'C';
         var mode = parameter as string ?? "analyze";
+
+        // Core 的 MaintainAsync 只按介质类型决定动作，会丢弃按钮传入的 trim/defrag 语义，
+        // 导致 HDD 点 TRIM 也跑碎片整理。调用前校验用户选择与介质是否匹配，不匹配直接提示并返回。
+        if (mode == "trim" && disk.MediaType != DiskMediaType.SolidStateDrive)
+        {
+            StatusMessage = LF("Optimize_DiskActionMismatch", L("Optimize_Trim"), disk.MediaTypeText);
+            return;
+        }
+        if (mode == "defrag" && disk.MediaType != DiskMediaType.HardDiskDrive)
+        {
+            StatusMessage = LF("Optimize_DiskActionMismatch", L("Optimize_Defrag"), disk.MediaTypeText);
+            return;
+        }
+
         var isTrim = disk.MediaType == DiskMediaType.SolidStateDrive;
         var action = mode == "analyze" ? L("Optimize_Analyze")
             : isTrim ? L("Optimize_Trim") : L("Optimize_Defrag");
@@ -211,12 +229,13 @@ public sealed class OptimizationViewModel : ViewModelBase
             var result = await Services.DiskMaintenance.MaintainAsync(
                 disk.DiskIndex, drive, disk.MediaType, mode == "analyze");
             StatusMessage = $"{action} → {result.ExitCode}";
+            if (!result.Succeeded) await DialogService.ErrorAsync(result.StandardError);
         }, action);
     }
 
     private async Task FlushDnsAsync()
         => await RunSimpleNetworkAsync(L("Optimize_FlushDns"),
-            () => Services.Network.FlushDnsAsync());
+            () => Services.Network.FlushDnsAsync(), requiresAdmin: false);
 
     private async Task ResetWinsockAsync()
         => await RunSimpleNetworkAsync(L("Optimize_ResetWinsock"),
@@ -226,13 +245,15 @@ public sealed class OptimizationViewModel : ViewModelBase
         => await RunSimpleNetworkAsync(L("Optimize_ResetTcpIp"),
             () => Services.Network.ResetTcpIpAsync());
 
-    private async Task RunSimpleNetworkAsync(string action, Func<Task<CommandExecutionResult>> work)
+    private async Task RunSimpleNetworkAsync(string action, Func<Task<CommandExecutionResult>> work,
+        bool requiresAdmin = true)
     {
-        // 不能只依赖界面禁用按钮：命令本身也要拦住非管理员调用。
-        if (!IsAdministrator) { StatusMessage = L("Common_AdminRequired"); return; }
+        // 刷新 DNS 不需要管理员；其余网络重置命令仍需提权，命令内部也要拦截，不能只依赖界面禁用。
+        if (requiresAdmin && !IsAdministrator) { StatusMessage = L("Common_AdminRequired"); return; }
         if (!await ConfirmAsync(action, L("Common_Risk") + ": " + L("Optimize_Subtitle"))) return;
         var result = await work();
         StatusMessage = $"{action} → {result.ExitCode}";
+        if (!result.Succeeded) await DialogService.ErrorAsync(result.StandardError);
     }
 
     private async Task PingAsync()

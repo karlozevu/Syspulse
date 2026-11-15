@@ -65,15 +65,14 @@ public static partial class PageViewLocator
         var cpu = new StackPanel();
         cpu.Children.AddRange(new[]
         {
+            // 最大睿频 / 温度 / 封装功耗在多数非管理员机器上恒为 N/A，已从 UI 展示中剔除；
+            // 型号、核心、主频、缓存、占用、实时频率保留。
             UiFactory.InfoRow("Hardware_CpuName", nameof(HardwareViewModel.CpuName)),
             UiFactory.InfoRow("Hardware_CpuCores", nameof(HardwareViewModel.CpuCores)),
             UiFactory.InfoRow("Hardware_CpuBase", nameof(HardwareViewModel.CpuBase)),
-            UiFactory.InfoRow("Hardware_CpuTurbo", nameof(HardwareViewModel.CpuTurbo)),
             UiFactory.InfoRow("Hardware_CpuCache", nameof(HardwareViewModel.CpuCache)),
             UiFactory.InfoRow("Hardware_CpuUsage", nameof(HardwareViewModel.CpuUsage)),
-            UiFactory.InfoRow("Hardware_CpuClock", nameof(HardwareViewModel.CpuClock)),
-            UiFactory.InfoRow("Hardware_CpuTemp", nameof(HardwareViewModel.CpuTemp)),
-            UiFactory.InfoRow("Hardware_CpuPower", nameof(HardwareViewModel.CpuPower))
+            UiFactory.InfoRow("Hardware_CpuClock", nameof(HardwareViewModel.CpuClock))
         });
 
         var memory = new StackPanel();
@@ -90,6 +89,12 @@ public static partial class PageViewLocator
         var gpu = UiFactory.BoundText(vm, nameof(HardwareViewModel.GpuList), mono: true);
         var disks = UiFactory.BoundText(vm, nameof(HardwareViewModel.DiskList), mono: true);
 
+        // 传感器驱动不可用时（Core 会以 Win32 CPU / 内存数据兜底）显示的降级提示。
+        // 放到曲线面板之前定义，便于 ChartsUpdated 回调刷新其可见性。
+        var sensorFallback = UiFactory.Muted("Hardware_SensorFallback");
+        sensorFallback.IsVisible = !string.IsNullOrWhiteSpace(
+            SystemAssistant.Core.Common.ServiceHub.Instance.SensorMonitor.LastError);
+
         var chartsPanel = new WrapPanel { Orientation = Orientation.Horizontal };
         var palette = new IBrush[]
         {
@@ -98,6 +103,9 @@ public static partial class PageViewLocator
         };
         vm.ChartsUpdated += charts =>
         {
+            // Core 修复后即使驱动不可用也会推送 Win32 数据，随每次快照刷新降级提示。
+            sensorFallback.IsVisible = !string.IsNullOrWhiteSpace(
+                SystemAssistant.Core.Common.ServiceHub.Instance.SensorMonitor.LastError);
             chartsPanel.Children.Clear();
             foreach (var chart in charts)
             {
@@ -113,9 +121,10 @@ public static partial class PageViewLocator
         };
         var sensors = new StackPanel { Spacing = 8 };
         sensors.Children.Add(UiFactory.Muted("Hardware_SensorsHint"));
-        sensors.Children.Add(UiFactory.Toolbar(
-            UiFactory.Button("Common_Refresh", vm.RefreshCommand),
-            UiFactory.Plain("")));
+        sensors.Children.Add(UiFactory.Muted("Hardware_ThresholdHint"));
+        sensors.Children.Add(sensorFallback);
+        // 曲线的「刷新」按钮其实是重读静态硬件信息、与曲线无关，已剔除；
+        // 开始 / 停止采集按钮位于页面顶部工具栏，曲线由 SnapshotUpdated 自动推送。
         sensors.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -134,7 +143,6 @@ public static partial class PageViewLocator
             UiFactory.InfoRow("Hardware_BatteryDesign", nameof(HardwareViewModel.BatteryDesign)),
             UiFactory.InfoRow("Hardware_BatteryFull", nameof(HardwareViewModel.BatteryFull)),
             UiFactory.InfoRow("Hardware_BatteryWear", nameof(HardwareViewModel.BatteryWear)),
-            UiFactory.InfoRow("Hardware_BatteryCycles", nameof(HardwareViewModel.BatteryCycles)),
             UiFactory.InfoRow("Hardware_BatteryCharge", nameof(HardwareViewModel.BatteryCharge))
         });
 

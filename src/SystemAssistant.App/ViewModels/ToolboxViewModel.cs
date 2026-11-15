@@ -47,7 +47,8 @@ public sealed class ToolboxViewModel : ViewModelBase
         });
         ShortcutCommand = new RelayCommand(p =>
         {
-            if (p is string tool) ShellHelper.OpenSystemTool(tool);
+            if (p is string tool && !ShellHelper.OpenSystemTool(tool))
+                StatusMessage = L("Status_OpenToolFailed");
         });
     }
 
@@ -98,9 +99,22 @@ public sealed class ToolboxViewModel : ViewModelBase
                 ProgressPercent = p.Percent;
                 ProgressText = $"{p.Processed}/{p.Total}  {p.CurrentFile}";
             });
-            var count = await Services.Toolbox.ShredAsync(ShredFiles,
+            var files = ShredFiles;
+            // Core 的 ShredAsync 只返回成功数、失败原因写进操作日志；用操作前的日志条数
+            // 作基线取出本次新增的失败条目，把原因汇总到状态栏而不是只显示「完成 0/N」。
+            var logBaseline = Services.OperationLog.GetAll().Count;
+            var count = await Services.Toolbox.ShredAsync(files,
                 new ShredOptions { Passes = Passes, RenameBeforeDelete = true }, progress);
-            StatusMessage = $"{L("Status_Done")} {count}/{ShredFiles.Count}";
+            StatusMessage = $"{L("Status_Done")} {count}/{files.Count}";
+            var failures = Services.OperationLog.GetAll()
+                .Skip(logBaseline)
+                .Where(e => !e.Success)
+                .Select(e => $"{e.Detail}: {e.ErrorMessage}")
+                .Take(10)
+                .ToArray();
+            if (failures.Length > 0)
+                StatusMessage += Environment.NewLine + L("Message_ErrorPrefix") +
+                                 string.Join("；", failures);
             ShredFiles = Array.Empty<string>();
             ShredFileList = string.Empty;
             ResultsChanged?.Invoke();
@@ -135,8 +149,9 @@ public sealed class ToolboxViewModel : ViewModelBase
             var progress = new Progress<string>(text => ProgressText = text);
             DuplicateGroups = await Services.Toolbox.FindDuplicatesAsync(new DuplicateScanOptions
             {
-                RootPath = RootPath,
-                MinimumSizeBytes = MinSizeMb * 1024L * 1024
+                // 沿用模型默认 1MB 阈值；MinSizeMb（默认 100MB）只服务于「大文件查找」，
+                // 套用到重复文件会过滤掉绝大多数结果。
+                RootPath = RootPath
             }, progress);
             DuplicateRows = DuplicateGroups.SelectMany(g => g.Files.Select(f => new DuplicateRow
             {
@@ -188,14 +203,19 @@ public sealed class ToolboxViewModel : ViewModelBase
         if (!confirmed) return;
 
         var success = 0;
+        var failures = new List<string>();
         foreach (var entry in entries)
         {
             var (ok, error, _) = FileSystemHelper.DeleteToRecycleBin(entry.FullPath);
             Services.OperationLog.Log(Models.Common.OperationType.File,
                 "删除工具箱文件", entry.FullPath, ok, ok ? null : error);
             if (ok) success++;
+            else failures.Add($"{entry.FullPath}: {error}");
         }
         StatusMessage = $"{L("Status_Done")} {success}/{entries.Length}";
+        if (failures.Count > 0)
+            StatusMessage += Environment.NewLine + L("Message_ErrorPrefix") +
+                             string.Join("；", failures.Take(10));
         if (which == "duplicate") await FindDuplicatesAsync();
         else await FindLargeAsync();
     }

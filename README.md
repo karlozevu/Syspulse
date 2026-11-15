@@ -4,7 +4,7 @@ Windows 10 / 11 上的本机硬件监控、安全清理与系统维护工具。�
 
 > 本项目**不联网上传任何硬件信息、扫描结果或文件列表**；不捆绑任何第三方软件、广告；不会静默修改系统设置。
 
-> 复检报告（缺陷清单、修复对照、已知遗留）：[REVIEW.md](REVIEW.md) · 变更记录：[CHANGELOG.md](CHANGELOG.md) · 安装包构建见第 8 节。
+> 复检报告：[REVIEW.md](REVIEW.md) · 全功能测试与修复：[FUNCTIONAL-TEST.md](FUNCTIONAL-TEST.md) · 变更记录：[CHANGELOG.md](CHANGELOG.md) · 安装包见第 8 节，回归探针见第 10 节。
 
 ---
 
@@ -100,7 +100,7 @@ dotnet run --project src/SystemAssistant.App/SystemAssistant.App.csproj
 
 ### 4.1 发布到 GitHub
 
-`scripts/publish_github.py` 通过 GitHub REST API 创建仓库、提交完整源码树，并可选创建 `v1.0.0` Release 附上两个便携版 zip。它**不依赖 `git push`**，因此可以在只放通 `api.github.com` 的代理环境下使用；仅用 Python 标准库。
+`scripts/publish_github.py` 通过 GitHub REST API 创建仓库、提交完整源码树，并按项目版本创建 Release（默认读取 `Directory.Build.props`，也可用 `--version` 指定），附上两个便携版 zip 与安装程序。它**不依赖 `git push`**，因此可以在只放通 `api.github.com` 的代理环境下使用；仅用 Python 标准库。
 
 ```bash
 # 1) 在 GitHub 创建 classic token（勾选 repo 即可）
@@ -118,7 +118,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 > `Resource not accessible by integration`），且往往只覆盖安装时选中的仓库，因此发布脚本
 > 使用一次性个人令牌；也可用 `git remote add origin` + `git push` 代替本脚本。
 
-可选参数：`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（zip 目录）、`--message`（提交信息）。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且**远端文件树与本地索引完全一致**（tree SHA 相同）。
+可选参数：`--version`（Release 标签，默认取 `Directory.Build.props` 的 `<Version>`；指定新版本会创建独立 tag 与 Release，历史版本保留）、`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（产物目录）、`--message`（提交信息）。脚本会上传两个 zip 与 `SystemAssistant-Setup-<版本>.exe`，重复运行会更新同版本 Release 的正文并替换同名附件。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且**远端文件树与本地索引完全一致**（tree SHA 相同）。
 
 > 注意：如果仓库是先在 GitHub 网页手动创建并初始化了 README，远端会多出一个初始提交，与本地的提交历史不同（文件内容相同）。此时从本地直接 `git push` 会被判为非快进而拒绝；建议以远端为准重新 `clone`，或在确认无他人提交后使用 `git push --force-with-lease`。
 
@@ -212,7 +212,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ## 8. Windows 安装程序（Inno Setup 6）
 
-成品：`artifacts/SystemAssistant-Setup-1.0.0.exe`（43,919,952 字节，约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
+成品：`artifacts/SystemAssistant-Setup-1.1.0.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
 
 ### 8.1 运行要求与安装位置
 
@@ -238,7 +238,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ```bat
 :: 完全静默安装（无界面）
-SystemAssistant-Setup-1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+SystemAssistant-Setup-1.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /DIR="%LOCALAPPDATA%\Programs\System Assistant" /LOG="%TEMP%\sa-install.log"
 
 :: 其他常用参数
@@ -283,3 +283,17 @@ scripts\build-installer.cmd
 | `installer/app.ico` | ICO 副本，供 Inno Setup 的 `SetupIconFile` 使用 |
 
 重新生成只需执行 `python scripts/make_icon.py`。图标通过三处接入：`.csproj` 的 `ApplicationIcon`（exe）、`Services/AppIcon.cs` 与各窗口的 `Icon` 属性（Avalonia 窗口与对话框）、Inno Setup 的 `SetupIconFile`（安装包向导与 setup.exe）。改动图标后需依次重新 build、发布便携版、构建安装包。
+
+---
+
+## 10. 功能回归探针
+
+`tests/FunctionalProbe/` 是一个**独立、只读**的控制台探针（不加入解决方案，不影响主程序构建），用于在不修改系统的前提下逐个验证业务层能力。
+
+```bash
+dotnet run --project tests/FunctionalProbe/FunctionalProbe.csproj -c Release
+```
+
+覆盖 34 项：配置与日志、整机概览与 TXT/MD/HTML 报告导出、CPU/内存/GPU/磁盘/电池/显示器、传感器与进程采集、垃圾清理扫描与注册表备份、启动项/服务/调优项、大文件/重复文件查找、网络延迟与更新检测、路径护栏与非法参数拒绝。结果写入 `artifacts/functional-test-report.txt`。
+
+探针**不执行**任何删除、注册表写入、服务启停、进程结束或系统修复命令；写操作只验证「应被拒绝」的校验路径。注册表备份会调用 `reg.exe`，在禁止该程序的安全沙箱里会返回 `Success=false`，属于环境限制而非代码缺陷。
