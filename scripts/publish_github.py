@@ -173,34 +173,56 @@ def push_tree(gh: GitHub, owner: str, repo: str, root: Path, branch: str, messag
 
 
 def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path, branch: str, root: Path):
+    """Create or update the v1.0.0 release. Idempotent: safe to re-run after a rebuild."""
     changelog = root / "CHANGELOG.md"
     body = changelog.read_text(encoding="utf-8") if changelog.exists() else "System Assistant v1.0.0"
-    body += "\n\n---\n\n**Portable builds** (attached to this release)\n\n" \
-            "- `win-x64-self-contained.zip` — single-file exe, no .NET runtime required\n" \
-            "- `win-x64-framework-dependent.zip` — single-file exe, requires .NET 9 Desktop Runtime\n"
+    body += "\n\n---\n\n**下载 / Downloads**\n\n" \
+            "- `SystemAssistant-Setup-1.0.0.exe` — Windows 安装向导（推荐；免 UAC，含卸载程序）\n" \
+            "- `win-x64-self-contained.zip` — 绿色单文件便携版，无需安装 .NET 运行时\n" \
+            "- `win-x64-framework-dependent.zip` — 绿色单文件便携版，需 .NET 9 Desktop Runtime\n" \
+            "\n> 本次为 1.0.0 复检修订（安全加固、缺陷修复、外观重做、安装包与应用图标）。" \
+            "完整清单见仓库 `REVIEW.md`。\n"
 
-    _, release = gh.request("POST", f"{API}/repos/{owner}/{repo}/releases", {
-        "tag_name": "v1.0.0",
-        "target_commitish": branch,
-        "name": "System Assistant v1.0.0",
-        "body": body,
-        "draft": False,
-        "prerelease": False,
-    })
-    print(f"  Release created: {release['html_url']}")
+    base = f"{API}/repos/{owner}/{repo}/releases"
+    existing = None
+    try:
+        _, existing = gh.request("GET", f"{base}/tags/v1.0.0")
+    except RuntimeError:
+        pass  # 404: release does not exist yet
 
-    candidates = sorted(artifacts.glob("*.zip"))
+    if existing:
+        release_id = existing["id"]
+        gh.request("PATCH", f"{base}/{release_id}", {"body": body, "name": "System Assistant v1.0.0"})
+        # Re-uploading an asset with the same name returns 422, so clear old ones first.
+        for asset in existing.get("assets", []):
+            gh.request("DELETE", f"{base}/assets/{asset['id']}")
+            print(f"  Removed stale asset: {asset['name']}")
+        print(f"  Release updated: {existing['html_url']}")
+    else:
+        _, created = gh.request("POST", base, {
+            "tag_name": "v1.0.0",
+            "target_commitish": branch,
+            "name": "System Assistant v1.0.0",
+            "body": body,
+            "draft": False,
+            "prerelease": False,
+        })
+        release_id = created["id"]
+        print(f"  Release created: {created['html_url']}")
+
+    candidates = sorted(artifacts.glob("*.zip")) + sorted(artifacts.glob("SystemAssistant-Setup-*.exe"))
     if not candidates:
-        print("  Warning: no zip artifacts found, release has no binaries")
-        return release["html_url"]
+        print("  Warning: no artifacts found, release has no binaries")
+        return existing["html_url"] if existing else ""
 
     for archive in candidates:
         name = archive.name
-        url = (f"{UPLOADS}/repos/{owner}/{repo}/releases/{release['id']}/assets"
+        url = (f"{UPLOADS}/repos/{owner}/{repo}/releases/{release_id}/assets"
                f"?name={urllib.parse.quote(name)}")
-        gh.request("POST", url, raw=archive.read_bytes(), content_type="application/zip")
+        content_type = "application/zip" if archive.suffix.lower() == ".zip" else "application/octet-stream"
+        gh.request("POST", url, raw=archive.read_bytes(), content_type=content_type)
         print(f"  Uploaded {name} ({archive.stat().st_size / 1024 / 1024:.1f} MB)")
-    return release["html_url"]
+    return existing["html_url"] if existing else f"https://github.com/{owner}/{repo}/releases/tag/v1.0.0"
 
 
 def main() -> int:

@@ -96,4 +96,4 @@
 | 安装包 | `artifacts/SystemAssistant-Setup-1.0.0.exe`，Inno Setup 6，免 UAC，含安装向导、开始菜单/桌面快捷方式、卸载程序与 HKCU 卸载信息；静默安装→卸载演练通过，用户数据目录保持不变 |
 | 冒烟测试 | 普通构建与自包含 exe 启动无崩溃、无 stderr、诊断日志为空 |
 
-> 说明：GitHub 仓库 `karlozevu/System-Assistant` 的 v1.0.0 仍是本次复检前的版本；如需同步，请重新执行 `scripts/publish_github.py` 并更新 Release 附件。
+> 说明：本次修订已同步到 GitHub 仓库 `karlozevu/System-Assistant` 的 `main` 分支；v1.0.0 Release 附件已替换为最新便携版，并新增 Windows 安装程序。复检报告、安装包脚本与应用图标源文件均随源码一起发布。
