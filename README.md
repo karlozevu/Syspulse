@@ -212,7 +212,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ## 8. Windows 安装程序（Inno Setup 6）
 
-成品：`artifacts/SystemAssistant-Setup-1.1.0.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
+成品：`artifacts/SystemAssistant-Setup-1.1.1.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
 
 ### 8.1 运行要求与安装位置
 
@@ -238,7 +238,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ```bat
 :: 完全静默安装（无界面）
-SystemAssistant-Setup-1.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+SystemAssistant-Setup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /DIR="%LOCALAPPDATA%\Programs\System Assistant" /LOG="%TEMP%\sa-install.log"
 
 :: 其他常用参数
@@ -294,6 +294,27 @@ scripts\build-installer.cmd
 dotnet run --project tests/FunctionalProbe/FunctionalProbe.csproj -c Release
 ```
 
-覆盖 34 项：配置与日志、整机概览与 TXT/MD/HTML 报告导出、CPU/内存/GPU/磁盘/电池/显示器、传感器与进程采集、垃圾清理扫描与注册表备份、启动项/服务/调优项、大文件/重复文件查找、网络延迟与更新检测、路径护栏与非法参数拒绝。结果写入 `artifacts/functional-test-report.txt`。
+覆盖 34 项：配置与日志、整机概览与 TXT/MD/HTML 报告导出、CPU/内存/GPU/磁盘/电池/显示器、传感器与进程采集、硬件读数校验、垃圾清理扫描与注册表备份、启动项/服务/调优项、大文件/重复文件查找、网络延迟与更新检测、路径护栏与非法参数拒绝。结果写入 `artifacts/functional-test-report.txt`。
 
 探针**不执行**任何删除、注册表写入、服务启停、进程结束或系统修复命令；写操作只验证「应被拒绝」的校验路径。注册表备份会调用 `reg.exe`，在禁止该程序的安全沙箱里会返回 `Success=false`，属于环境限制而非代码缺陷。
+
+---
+
+## 11. 硬件读数说明
+
+### 11.1 显存容量的取值优先级
+
+`Win32_VideoController.AdapterRAM` 是 **32 位字段**，8 GB / 12 GB 独显常回绕成 2 GB 或饱和到 4 GB，这是此前「显存显示不准」的根因。现在按以下顺序取值：
+
+| 优先级 | 来源 | 标注 |
+| --- | --- | --- |
+| 1 | 显卡驱动注册表 `HardwareInformation.qwMemorySize`（REG_QWORD，64 位） | 专用显存，精确值 |
+| 2 | 同名驱动的 `HardwareInformation.MemorySize`（REG_DWORD） | 专用显存，精确值 |
+| 3 | WMI `AdapterRAM`（仅当明显低于 4 GB 上限时才可信） | 提示可能受 4 GB 上限限制 |
+| 4 | 两者都不可信 | 显示 N/A，不编造容量 |
+
+注册表路径为 `HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}\000N`，普通用户权限即可读取；名称用精确 / 包含 / 双词重叠三级匹配，避免把虚拟显示器误配到实体显卡，同型号多卡按索引逐个配对。
+
+### 11.2 系统名称
+
+`Win32_OperatingSystem.Caption` 在 Windows 11 上仍返回 `Microsoft Windows 10 ...`，而注册表 `ProductName` 同样是遗留的 `Windows 10 Pro`。早期代码把两者拼在一起，导致「系统」一行同时出现两个互相矛盾的名字。现在只保留 Caption，并按内部版本号（`BuildNumber >= 22000`）把字面 `Windows 10` 规范化为 `Windows 11`，再补 `DisplayVersion`（如 24H2）。「内核版本」行显示 `10.0.xxxxx` 属于 Windows NT 内核版本，不代表产品名称。

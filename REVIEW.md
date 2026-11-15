@@ -95,7 +95,7 @@
 | --- | --- |
 | 源码编译 | Release 0 错误 0 警告（四层 + 安装包脚本） |
 | 便携版 | 框架依赖单文件 exe + zip；自包含单文件 exe + zip（免装 .NET 运行时） |
-| 安装包 | `artifacts/SystemAssistant-Setup-1.1.0.exe`，Inno Setup 6，免 UAC，含安装向导、开始菜单/桌面快捷方式、卸载程序与 HKCU 卸载信息；静默安装→卸载演练通过，用户数据目录保持不变 |
+| 安装包 | `artifacts/SystemAssistant-Setup-1.1.1.exe`，Inno Setup 6，免 UAC，含安装向导、开始菜单/桌面快捷方式、卸载程序与 HKCU 卸载信息；静默安装→卸载演练通过，用户数据目录保持不变 |
 | 冒烟测试 | 普通构建与自包含 exe 启动无崩溃、无 stderr、诊断日志为空 |
 
-> 说明：以上修订已同步到 GitHub 仓库 `karlozevu/System-Assistant`；`v1.0.0` 为初版发布，全部修订内容随 `v1.1.0` 正式发布。复检报告、安装包脚本与应用图标源文件均随源码一起发布。
+> 说明：以上修订已同步到 GitHub 仓库 `karlozevu/System-Assistant`；`v1.0.0` 为初版发布，全部修订内容随 `v1.1.0` 正式发布；系统名称与显存读数修复随 `v1.1.1` 发布。复检报告、安装包脚本与应用图标源文件均随源码一起发布。

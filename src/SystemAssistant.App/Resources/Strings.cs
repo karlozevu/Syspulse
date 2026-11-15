@@ -69,6 +69,8 @@ internal static class Strings
         ["Status_Ready"] = "就绪",
         ["Status_Cancelled"] = "操作已取消",
         ["Message_ErrorPrefix"] = "错误：",
+        ["Hardware_VramSourceRegistry"] = "（专用显存，来自显卡驱动的 64 位精确值）",
+        ["Hardware_VramUnknown"] = "（该显卡未上报可靠的显存容量）",
         ["Label_Cores"] = "核",
         ["Label_Threads"] = "线程",
         ["Label_Used"] = "已用",
@@ -118,7 +120,7 @@ internal static class Strings
         ["Overview_Display"] = "显示器",
         ["Overview_GeneratedAt"] = "生成时间",
         ["Overview_OsName"] = "系统",
-        ["Overview_Version"] = "版本",
+        ["Overview_Version"] = "内核版本",
         ["Overview_Build"] = "内部版本",
         ["Overview_Arch"] = "架构",
         ["Overview_InstallDate"] = "安装时间",
@@ -304,7 +306,7 @@ internal static class Strings
         ["Update_Info"] = "更新检测：{0}",
         ["Optimize_DiskActionMismatch"] = "「{0}」不适用于当前磁盘介质（{1}），请改用匹配该介质的操作或「仅分析」",
         ["Status_OpenToolFailed"] = "无法打开该系统工具（可能未安装或权限不足）",
-        ["Hardware_GpuVramNote"] = "（显存容量来自 WMI，可能受 32 位上限限制，仅供参考）",
+        ["Hardware_GpuVramNote"] = "（来自 WMI 的 32 位字段，可能受 4 GB 上限限制，仅供参考）",
         ["Hardware_SensorFallback"] = "硬件传感器驱动不可用，已改用系统 API 显示 CPU / 内存占用",
         ["Hardware_ThresholdHint"] = "阈值在设置页配置（目前仅温度）"
     };
@@ -372,6 +374,8 @@ internal static class Strings
         ["Status_Ready"] = "Ready",
         ["Status_Cancelled"] = "Operation cancelled",
         ["Message_ErrorPrefix"] = "Error: ",
+        ["Hardware_VramSourceRegistry"] = "(Dedicated VRAM, exact 64-bit driver value)",
+        ["Hardware_VramUnknown"] = "(No reliable VRAM capacity reported by this adapter)",
         ["Label_Cores"] = "cores",
         ["Label_Threads"] = "threads",
         ["Label_Used"] = "used",
@@ -421,7 +425,7 @@ internal static class Strings
         ["Overview_Display"] = "Displays",
         ["Overview_GeneratedAt"] = "Generated at",
         ["Overview_OsName"] = "OS",
-        ["Overview_Version"] = "Version",
+        ["Overview_Version"] = "Kernel version",
         ["Overview_Build"] = "Build",
         ["Overview_Arch"] = "Architecture",
         ["Overview_InstallDate"] = "Installed",
@@ -607,7 +611,7 @@ internal static class Strings
         ["Update_Info"] = "Update check: {0}",
         ["Optimize_DiskActionMismatch"] = "\"{0}\" does not apply to the current disk media ({1}); use the matching action or \"Analyze only\"",
         ["Status_OpenToolFailed"] = "Could not open the system tool (not installed or insufficient rights)",
-        ["Hardware_GpuVramNote"] = "(VRAM reported by WMI; may be capped by a 32-bit limit, for reference only)",
+        ["Hardware_GpuVramNote"] = "(32-bit WMI field; may be capped at 4 GB, for reference only)",
         ["Hardware_SensorFallback"] = "Hardware sensor driver unavailable; CPU / memory usage shown via system APIs",
         ["Hardware_ThresholdHint"] = "Thresholds are configured in Settings (temperature only for now)"
     };

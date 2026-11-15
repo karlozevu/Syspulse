@@ -2,6 +2,22 @@
 
 本项目遵循语义化版本约定。所有重要变更记录在此。
 
+## [1.1.1] - 2026-11-15
+
+补丁版本：修复两个硬件信息读数缺陷，不引入任何界面或行为变化。
+
+### 修复
+- **系统名称重复且错误**：不再拼接注册表中遗留的 `ProductName`（Windows 11 上仍为 "Windows 10 Pro"），改为按 `BuildNumber >= 22000` 把 WMI Caption 里的 `Windows 10` 规范化为 `Windows 11` 并补 `DisplayVersion`；概览页「版本」行改为「内核版本」，避免 `10.0.xxxxx` 被误读成 Windows 10。
+- **显卡显存不准**：`Win32_VideoController.AdapterRAM` 是 uint32，大显存会回绕。改为优先读驱动注册表的 64 位 `HardwareInformation.qwMemorySize`（含名称匹配与多卡配对），WMI 仅在可信范围内回落，都不可用时显示 N/A；界面与导出报告按来源分别标注。
+- 报告导出不再把 0 字节显存写成 `0 B`。
+
+### 实测结果
+- 回归探针新增 1 项（`Hardware.OsCaption + VramSource`），**34/34 PASS**；注册表备份项按策略 SKIP。
+- 系统名：`Microsoft Windows 11 专业版 (26H2)`，无 `Windows 10` 残留；内核版本 `10.0.26300` 单独标注。
+- 显存：`AMD Radeon(TM) Graphics = 2147483648 B (2048 MB), source=Registry`；虚拟显示器 `source=Unknown` 显示 N/A。
+
+---
+
 ## [1.1.0] - 2026-11-15
 
 首个功能修订版本，将 1.0.0 之后的所有复检、修复与体验改进正式固化：

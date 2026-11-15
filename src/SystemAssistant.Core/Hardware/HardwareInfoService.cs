@@ -66,18 +66,18 @@ public sealed class HardwareInfoService : IHardwareInfoService
         var caption = os?.String("Caption");
         if (string.IsNullOrWhiteSpace(caption)) caption = RuntimeInformation.OSDescription;
 
-        // Win32_OperatingSystem.Caption 在 Windows 11 上仍显示 "Windows 10"，
-        // 因此读取注册表补充 DisplayVersion / UBR 得到更准确的展示名。
+        // 注册表的 DisplayVersion（如 24H2）与 UBR 可补全展示信息。
+        // 注意：ProductName 是历史遗留值，Windows 11 上仍写 "Windows 10 Pro"，
+        // 早期版本把它拼到 Caption 后面，导致「系统」一行同时出现两个互相矛盾的系统名，
+        // 因此这里刻意不再读取和使用 ProductName。
         var displayVersion = string.Empty;
-        var productName = string.Empty;
-        var ubr = string.Empty;
         var currentBuild = string.Empty;
+        var ubr = string.Empty;
         try
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
             if (key is not null)
             {
-                productName = key.GetValue("ProductName")?.ToString() ?? string.Empty;
                 displayVersion = key.GetValue("DisplayVersion")?.ToString() ?? string.Empty;
                 currentBuild = key.GetValue("CurrentBuild")?.ToString() ?? string.Empty;
                 ubr = key.GetValue("UBR")?.ToString() ?? string.Empty;
@@ -85,12 +85,15 @@ public sealed class HardwareInfoService : IHardwareInfoService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
 
-        var build = os?.String("BuildNumber", "Version");
-        if (string.IsNullOrWhiteSpace(build)) build = currentBuild;
+        var buildNumber = os?.String("BuildNumber", "Version");
+        if (string.IsNullOrWhiteSpace(buildNumber)) buildNumber = currentBuild;
+        caption = NormalizeWindowsCaption(caption, buildNumber);
+        if (!string.IsNullOrEmpty(displayVersion)
+            && !caption.Contains(displayVersion, StringComparison.OrdinalIgnoreCase))
+            caption += $" ({displayVersion})";
+
+        var build = buildNumber;
         if (!string.IsNullOrEmpty(ubr)) build += "." + ubr;
-        if (!string.IsNullOrEmpty(displayVersion)) caption += $" ({displayVersion})";
-        if (!string.IsNullOrEmpty(productName) && !caption.Contains(productName, StringComparison.OrdinalIgnoreCase))
-            caption += " · " + productName;
 
         var version = os?.String("Version");
         if (string.IsNullOrWhiteSpace(version)) version = Environment.OSVersion.Version.ToString();
@@ -106,6 +109,22 @@ public sealed class HardwareInfoService : IHardwareInfoService
             ComputerName = Environment.MachineName,
             UserName = Environment.UserName
         };
+    }
+
+    /// <summary>
+    /// Win32_OperatingSystem.Caption 在 Windows 11 上仍返回 "Microsoft Windows 10 ..."。
+    /// 用 BuildNumber（Windows 11 起为 22000）修正这处历史遗留错误，只替换字面
+    /// "Windows 10"，保留厂商前缀、SKU 与语言（如 "Microsoft ... 专业版"）。
+    /// Windows Server 的 Caption 不含该字面，因此不会被误改。
+    /// </summary>
+    private static string NormalizeWindowsCaption(string caption, string buildNumber)
+    {
+        const string legacy = "Windows 10";
+        if (!int.TryParse(buildNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out var build)
+            || build < 22000) return caption;
+        var index = caption.IndexOf(legacy, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return caption;
+        return caption[..index] + "Windows 11" + caption[(index + legacy.Length)..];
     }
 
     private static MotherboardInfo BuildMotherboard()
@@ -283,18 +302,24 @@ public sealed class HardwareInfoService : IHardwareInfoService
 
     private IReadOnlyList<GpuInfo> BuildGpus()
     {
+        // 显存优先取驱动注册表的 64 位 QWORD。Win32_VideoController.AdapterRAM 是
+        // uint32，8 GB / 12 GB 显卡会回绕成 2 GB 或饱和到 4 GB，是长期误报的根源。
+        var registryVram = ReadGpuVramFromRegistry();
+        var matchedAdapters = new HashSet<int>();
         var gpus = new List<GpuInfo>();
         foreach (var controller in Select(CimV2, "Win32_VideoController"))
         {
+            var name = controller.String("Name");
+            var (vram, source) = ResolveVram(name, controller.Int64("AdapterRAM"), registryVram, matchedAdapters);
             var gpu = new GpuInfo
             {
-                Name = controller.String("Name"),
+                Name = name,
                 DriverVersion = controller.String("DriverVersion"),
                 DriverDate = FormatHelper.FormatCimDateTime(controller.String("DriverDate")),
                 VideoProcessor = controller.String("VideoProcessor"),
                 Resolution = $"{controller.Int64("CurrentHorizontalResolution")} x {controller.Int64("CurrentVerticalResolution")}",
-                // Win32_VideoController.AdapterRAM 为 32 位字段，超过 4 GB 时会被截断，仅作参考
-                VramTotalBytes = controller.Int64("AdapterRAM")
+                VramTotalBytes = vram,
+                VramSource = source
             };
             gpus.Add(gpu);
         }
@@ -326,6 +351,91 @@ public sealed class HardwareInfoService : IHardwareInfoService
             if (memory is not null) gpu.VramUsedBytes = (long)(memory.Value * 1024 * 1024);
         }
         return gpus;
+    }
+
+    /// <summary>
+    /// 从显卡驱动注册表读取 64 位显存容量。
+    /// HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}\000N 下的
+    /// HardwareInformation.qwMemorySize 是 REG_QWORD，能正确表示 8 GB 以上显存；
+    /// 旧驱动的 HardwareInformation.MemorySize 是 REG_DWORD，作为次级来源。
+    /// 普通用户权限即可读取，不需要管理员。
+    /// </summary>
+    private static List<(string Description, long Bytes)> ReadGpuVramFromRegistry()
+    {
+        var result = new List<(string, long)>();
+        const string path = @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+        try
+        {
+            using var root = Registry.LocalMachine.OpenSubKey(path);
+            if (root is null) return result;
+            foreach (var subName in root.GetSubKeyNames())
+            {
+                if (subName.Length == 0 || !subName.All(char.IsDigit)) continue;
+                using var key = root.OpenSubKey(subName);
+                if (key is null) continue;
+                var description = key.GetValue("DriverDesc")?.ToString();
+                if (string.IsNullOrWhiteSpace(description)) continue;
+
+                var bytes = ReadRegistryLong(key.GetValue("HardwareInformation.qwMemorySize"));
+                if (bytes <= 0) bytes = ReadRegistryLong(key.GetValue("HardwareInformation.MemorySize"));
+                // 只接受 32 MB ~ 128 GB 的合理值，过滤 0xffffffff 之类的哨兵数据
+                if (bytes >= 32L * 1024 * 1024 && bytes <= 128L * 1024 * 1024 * 1024)
+                    result.Add((description, bytes));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
+        return result;
+    }
+
+    private static long ReadRegistryLong(object? value) => value switch
+    {
+        long l => l,
+        int i => i,
+        uint u => u,
+        byte[] raw when raw.Length >= 8 => BitConverter.ToInt64(raw, 0),
+        byte[] raw when raw.Length == 4 => BitConverter.ToInt32(raw, 0),
+        _ => 0
+    };
+
+    private static (long Bytes, string Source) ResolveVram(
+        string name, long wmiBytes,
+        IReadOnlyList<(string Description, long Bytes)> registry,
+        HashSet<int> matchedAdapters)
+    {
+        var candidates = new List<(int Score, int Index, long Bytes)>();
+        for (var i = 0; i < registry.Count; i++)
+        {
+            if (matchedAdapters.Contains(i)) continue;
+            var score = MatchGpuName(name, registry[i].Description);
+            if (score > 0) candidates.Add((score, i, registry[i].Bytes));
+        }
+        if (candidates.Count > 0)
+        {
+            var best = candidates.OrderByDescending(c => c.Score).ThenBy(c => c.Index).First();
+            matchedAdapters.Add(best.Index);
+            return (best.Bytes, "Registry");   // 64 位精确值
+        }
+
+        // WMI AdapterRAM 是 uint32：>= 4 GB 会回绕或饱和，接近上限时不可信，直接标为未知。
+        const long wmiLimit = 4L * 1024 * 1024 * 1024;
+        if (wmiBytes > 0 && wmiBytes < wmiLimit - 64L * 1024 * 1024)
+            return (wmiBytes, "WMI");
+        return (0, "Unknown");
+    }
+
+    private static int MatchGpuName(string wmiName, string description)
+    {
+        if (string.IsNullOrWhiteSpace(wmiName) || string.IsNullOrWhiteSpace(description)) return 0;
+        if (string.Equals(wmiName, description, StringComparison.OrdinalIgnoreCase)) return 100;
+        if (wmiName.Contains(description, StringComparison.OrdinalIgnoreCase)
+            || description.Contains(wmiName, StringComparison.OrdinalIgnoreCase)) return 80;
+        // 至少两个长度 >= 3 的共同词才算匹配，避免把虚拟显示器误配到实体显卡
+        var left = wmiName.Split(new[] { ' ', '(', ')', '[', ']', '-', '_', '/' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length >= 3).Select(t => t.ToLowerInvariant()).ToHashSet();
+        var right = description.Split(new[] { ' ', '(', ')', '[', ']', '-', '_', '/' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => t.Length >= 3).Select(t => t.ToLowerInvariant()).ToHashSet();
+        var shared = left.Intersect(right).Count();
+        return shared >= 2 ? 40 + shared : 0;
     }
 
     #endregion

@@ -22,7 +22,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
 
     public string CurrentVersion =>
         Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?.Split('+')[0] ?? "1.1.0";
+            ?.Split('+')[0] ?? "1.1.1";
 
     public async Task<AppVersionInfo> CheckAsync(CancellationToken token = default)
     {

@@ -143,11 +143,11 @@ public sealed class HardwareViewModel : ViewModelBase
             : string.Join("；", o.Memory.Modules.Select(m =>
                 $"{m.Slot}: {m.Manufacturer} {FormatHelper.FormatBytes(m.CapacityBytes)} @ {m.SpeedMHz} MHz"));
 
-        // 已用显存 / 负载 / 核心温度在多数机器上恒为 N/A（显存总量还受 uint32 截断），
-        // 组合文本只保留型号与显存总量，并标注容量来自 WMI、可能受 32 位上限限制。
+        // 显存优先取驱动注册表的 64 位精确值；只有回落到 WMI 的 uint32 时才标注可能截断，
+        // 两者都不可用时显示 N/A，避免把「0 B」或回绕后的 2 GB 当成真实容量。
         GpuList = o.Gpus.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine + Environment.NewLine,
             o.Gpus.Select(g => $"{g.Name}{Environment.NewLine}" +
-                $"  {L("Hardware_GpuVram")}: {FormatHelper.FormatBytes(g.VramTotalBytes)} {L("Hardware_GpuVramNote")}"));
+                $"  {L("Hardware_GpuVram")}: {VramText(g)} {VramNote(g)}"));
 
         DiskList = o.Disks.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine + Environment.NewLine,
             o.Disks.Select(d => $"[{d.MediaTypeText}] {L("Label_Disk")} {d.DiskIndex} {d.Model}  " +
@@ -223,6 +223,16 @@ public sealed class HardwareViewModel : ViewModelBase
     {
         if (_overview is not null) Apply(_overview);
     }
+
+    private static string VramText(GpuInfo gpu)
+        => gpu.VramTotalBytes > 0 ? FormatHelper.FormatBytes(gpu.VramTotalBytes) : L("Common_NA");
+
+    private static string VramNote(GpuInfo gpu) => gpu.VramSource switch
+    {
+        "Registry" => L("Hardware_VramSourceRegistry"),
+        "WMI" => L("Hardware_GpuVramNote"),
+        _ => L("Hardware_VramUnknown")
+    };
 
     private static string HealthText(DiskHealthStatus status) => status switch
     {

@@ -97,7 +97,8 @@ public sealed class OverviewViewModel : ViewModelBase
         MemorySummary = $"{FormatHelper.FormatBytes(o.Memory.TotalBytes)} · {L("Label_Used")} {FormatHelper.FormatBytes(o.Memory.UsedBytes)} ({o.Memory.UsagePercent:F1} %)";
         GpuSummary = o.Gpus.Count == 0
             ? L("Common_None")
-            : string.Join("；", o.Gpus.Select(g => $"{g.Name}（{FormatHelper.FormatBytes(g.VramTotalBytes)}）"));
+            : string.Join("；", o.Gpus.Select(g =>
+                $"{g.Name}（{(g.VramTotalBytes > 0 ? FormatHelper.FormatBytes(g.VramTotalBytes) : L("Common_NA"))}）"));
         DiskSummary = o.Disks.Count == 0
             ? L("Common_None")
             : string.Join("；", o.Disks.Select(d =>

@@ -123,6 +123,17 @@ await Test("Sensors.Start + 3s", async () =>
     hub.Sensors.Stop();
     return $"snapshots={count}, snapshotReadings={snapReadings}, latest={latestCount}, running={isRunning}, kinds={kinds}, lastError={lastError ?? "(none)"}";
 });
+await Test("Hardware.OsCaption + VramSource", async () =>
+{
+    var o = await hub.Hardware.GetOverviewAsync();
+    var build = o.OperatingSystem.BuildNumber.Split('.')[0];
+    var isWin11 = int.TryParse(build, out var b) && b >= 22000;
+    // Windows 11 上 Caption 不应再残留 "Windows 10"（修复前会拼上 ProductName 遗留值）。
+    if (isWin11 && o.OperatingSystem.Caption.Contains("Windows 10", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("stale Windows 10 caption: " + o.OperatingSystem.Caption);
+    var gpus = string.Join(", ", o.Gpus.Select(g => $"{g.Name}={g.VramSource}/{g.VramTotalBytes}"));
+    return $"caption={o.OperatingSystem.Caption}; gpus=[{gpus}]";
+});
 await Test("Processes.Start + 3s", async () =>
 {
     var count = 0;

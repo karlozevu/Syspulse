@@ -159,7 +159,12 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
             var gpu = o.Gpus[i];
             gpuRows.Add(($"显卡 #{i + 1}", gpu.Name));
             gpuRows.Add(("驱动版本", gpu.DriverVersion));
-            gpuRows.Add(("显存", FormatHelper.FormatBytes(gpu.VramTotalBytes)
+            var vram = gpu.VramTotalBytes > 0
+                ? FormatHelper.FormatBytes(gpu.VramTotalBytes)
+                  + (gpu.VramSource == "Registry" ? "（驱动注册表 64 位精确值）"
+                     : gpu.VramSource == "WMI" ? "（WMI 32 位字段，可能受 4 GB 上限限制）" : "")
+                : "N/A（该显卡未上报可靠容量）";
+            gpuRows.Add(("显存", vram
                 + (gpu.VramUsedBytes.HasValue ? $" / 已用 {FormatHelper.FormatBytes(gpu.VramUsedBytes.Value)}" : "")));
             gpuRows.Add(("负载", gpu.LoadPercent.HasValue ? $"{gpu.LoadPercent:F1} %" : "N/A"));
             gpuRows.Add(("核心温度", gpu.TemperatureCelsius.HasValue ? $"{gpu.TemperatureCelsius:F1} °C" : "N/A"));

@@ -102,7 +102,7 @@ def read_project_version(root: Path) -> str:
                           props.read_text(encoding="utf-8"))
         if match:
             return match.group(1).strip()
-    return "1.1.0"
+    return "1.1.1"
 
 
 def read_tracked_files(root: Path):
@@ -200,9 +200,7 @@ def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path,
         "Windows 硬件监控、安全清理与系统优化工具（C# .NET 9 + Avalonia UI，"
         "Models / Utils / Core / App 四层架构）。所有高危操作二次确认并写日志，"
         "不联网上传任何用户数据。\n\n"
-        "**本版本亮点**：全功能复测与修复 —— 传感器在驱动不可用时改用 Win32 "
-        "API 推送 CPU / 内存快照、管理员提权后自动关闭旧窗口、修复日志/清理/优化/工具箱"
-        "多处功能断点，并剔除恒为空的展示项与不可靠调优开关。\n\n"
+        "**本版本变更**：见下方更新日志；完整清单见仓库 `CHANGELOG.md`。\n\n"
         "**下载 / Downloads**\n\n"
         f"- `{setup_name}` — Windows 安装向导（推荐；免 UAC，含卸载程序）\n"
         "- `win-x64-self-contained.zip` — 绿色单文件便携版，无需安装 .NET 运行时\n"
