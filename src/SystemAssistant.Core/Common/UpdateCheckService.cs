@@ -1,0 +1,83 @@
+using System.Net.Http;
+using System.Reflection;
+using System.Text.Json;
+using SystemAssistant.Core.Interfaces;
+using SystemAssistant.Models.Common;
+
+namespace SystemAssistant.Core.Common;
+
+/// <summary>
+/// 版本更新检测。默认关闭：只有在用户显式配置了 UpdateCheckUrl 时才会发出一次 GET 请求。
+/// 请求内容仅为版本查询，不携带任何硬件信息、扫描结果或文件列表；也不会下载或安装更新。
+/// </summary>
+public sealed class UpdateCheckService : IUpdateCheckService
+{
+    private readonly Func<string> _getUrl;
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
+
+    public UpdateCheckService(Func<string> getUrl) => _getUrl = getUrl;
+
+    public string CurrentVersion =>
+        Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?.Split('+')[0] ?? "1.0.0";
+
+    public async Task<AppVersionInfo> CheckAsync(CancellationToken token = default)
+    {
+        var url = _getUrl();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return new AppVersionInfo
+            {
+                CurrentVersion = CurrentVersion,
+                Message = "未配置更新检测地址，已跳过联网检测（默认不联网）"
+            };
+        }
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = $"检测失败：HTTP {(int)response.StatusCode}" };
+            }
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+            var root = document.RootElement;
+            var latest = root.TryGetProperty("version", out var v) ? v.GetString() ?? string.Empty : string.Empty;
+            var notes = root.TryGetProperty("notes", out var n) ? n.GetString() ?? string.Empty : string.Empty;
+            var page = root.TryGetProperty("url", out var u) ? u.GetString() ?? string.Empty : string.Empty;
+
+            return new AppVersionInfo
+            {
+                CurrentVersion = CurrentVersion,
+                LatestVersion = latest,
+                ReleaseNotes = notes,
+                DownloadPage = page,
+                HasUpdate = IsNewer(latest, CurrentVersion),
+                Message = "检测完成"
+            };
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = "更新检测不可用：" + ex.Message };
+        }
+    }
+
+    /// <summary>逐段比较数字版本号，忽略预发布后缀。</summary>
+    private static bool IsNewer(string latest, string current)
+    {
+        if (string.IsNullOrWhiteSpace(latest)) return false;
+        static int[] Parse(string s) => s.Split('-')[0].Split('.')
+            .Select(p => int.TryParse(p, out var value) ? value : 0).ToArray();
+
+        var a = Parse(latest);
+        var b = Parse(current);
+        for (var i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            var x = i < a.Length ? a[i] : 0;
+            var y = i < b.Length ? b[i] : 0;
+            if (x != y) return x > y;
+        }
+        return false;
+    }
+}

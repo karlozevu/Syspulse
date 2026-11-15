@@ -1,0 +1,18 @@
+# 统一换行策略：仓库内一律 LF，Windows 脚本在工作区保持 CRLF。
+* text=auto eol=lf
+
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+*.ps1    text eol=crlf
+*.sln    text eol=crlf
+*.csproj text eol=crlf
+*.props  text eol=crlf
+*.axaml  text eol=lf
+*.md     text eol=lf
+*.json   text eol=lf
+
+# 二进制 / 发布产物不参与换行转换
+*.png binary
+*.exe binary
+*.dll binary
+*.zip binary

@@ -1,0 +1,18 @@
+<Project>
+  <!-- 全解决方案共享的编译设置。业务库不引用任何 UI 框架。 -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <Authors>System Assistant Contributors</Authors>
+    <Company>System Assistant</Company>
+    <Product>System Assistant</Product>
+    <Copyright>Copyright (c) 2026 System Assistant</Copyright>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- WMI / 注册表 / P-Invoke 属于 Windows 专用能力，已在项目级限定 net9.0-windows -->
+    <NoWarn>$(NoWarn);CA1416;SYSLIB1054;NU1902;NU1903</NoWarn>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+</Project>

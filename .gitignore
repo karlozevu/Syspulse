@@ -1,0 +1,15 @@
+bin/
+obj/
+artifacts/
+.vs/
+.vscode/
+*.user
+*.suo
+*.log
+*.zip
+.dotnet/
+__pycache__/
+*.pyc
+
+# Local-only publishing credential. Never commit this file.
+.github_token

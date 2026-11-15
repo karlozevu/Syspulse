@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 纯数据实体：不依赖任何 UI 框架，也不依赖 Windows API，可被任意前端复用 -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>SystemAssistant.Models</RootNamespace>
+  </PropertyGroup>
+</Project>

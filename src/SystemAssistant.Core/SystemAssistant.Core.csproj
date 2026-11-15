@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 核心业务库：完全不依赖 Avalonia，未来换 WPF 时本层可直接复用 -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RootNamespace>SystemAssistant.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SystemAssistant.Models\SystemAssistant.Models.csproj" />
+    <ProjectReference Include="..\SystemAssistant.Utils\SystemAssistant.Utils.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
+    <PackageReference Include="System.Management" Version="9.0.9" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
+  </ItemGroup>
+</Project>
