@@ -116,7 +116,9 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 > `Resource not accessible by integration`），且往往只覆盖安装时选中的仓库，因此发布脚本
 > 使用一次性个人令牌；也可用 `git remote add origin` + `git push` 代替本脚本。
 
-可选参数：`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（zip 目录）、`--message`（提交信息）。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且远端 tree 与本地提交一致，后续 `git push` 不会分叉。
+可选参数：`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（zip 目录）、`--message`（提交信息）。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且**远端文件树与本地索引完全一致**（tree SHA 相同）。
+
+> 注意：如果仓库是先在 GitHub 网页手动创建并初始化了 README，远端会多出一个初始提交，与本地的提交历史不同（文件内容相同）。此时从本地直接 `git push` 会被判为非快进而拒绝；建议以远端为准重新 `clone`，或在确认无他人提交后使用 `git push --force-with-lease`。
 
 ---
 
