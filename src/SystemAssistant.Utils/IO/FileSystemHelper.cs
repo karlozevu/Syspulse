@@ -70,11 +70,14 @@ public static class FileSystemHelper
     }
 
     /// <summary>
-    /// 永久删除文件或目录。删除前强制经过 <see cref="PathGuard"/> 校验。
+    /// 永久删除文件或目录。删除前强制经过 <see cref="PathGuard"/> 校验，
+    /// 并拒绝路径中带有符号链接 / junction 的项，避免删除越界到真实目标。
     /// </summary>
     public static (bool Success, string Error) DeletePermanently(string path)
     {
         if (!PathGuard.IsSafeToDelete(path, out var reason)) return (false, reason);
+        if (PathGuard.HasReparsePointInPath(path))
+            return (false, "路径中包含符号链接 / 重解析点，拒绝永久删除");
 
         try
         {
@@ -102,11 +105,13 @@ public static class FileSystemHelper
 
     /// <summary>
     /// 把文件送入回收站（用于「大文件 / 重复文件」这类用户文件删除）。
-    /// 若系统不支持回收站则回落到永久删除，但返回值会标注实际行为。
+    /// 回收站不可用时绝不自动降级为永久删除：失败即返回失败，由调用方提示用户。
     /// </summary>
     public static (bool Success, string Error, bool UsedRecycleBin) DeleteToRecycleBin(string path)
     {
         if (!PathGuard.IsSafeToDelete(path, out var reason)) return (false, reason, false);
+        if (PathGuard.HasReparsePointInPath(path))
+            return (false, "路径中包含符号链接 / 重解析点，拒绝删除", false);
         try
         {
             if (Directory.Exists(path))
@@ -125,10 +130,11 @@ public static class FileSystemHelper
             }
             return (true, string.Empty, true);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            var fallback = DeletePermanently(path);
-            return (fallback.Success, fallback.Error, false);
+            // 安全底线：回收站删除失败时绝不静默降级为永久删除，
+            // 必须把失败明确返回给调用方，由用户决定后续处理方式。
+            return (false, "送入回收站失败：" + ex.Message, false);
         }
     }
 

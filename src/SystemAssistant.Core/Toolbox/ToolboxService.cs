@@ -61,87 +61,118 @@ public sealed class ToolboxService : IToolboxService
         }, token);
     }
 
-    public async Task<IReadOnlyList<DuplicateGroup>> FindDuplicatesAsync(DuplicateScanOptions options,
+    public Task<IReadOnlyList<DuplicateGroup>> FindDuplicatesAsync(DuplicateScanOptions options,
         IProgress<string>? status = null, CancellationToken token = default)
     {
-        status?.Report("正在枚举文件并按大小分组");
-        var bySize = new Dictionary<long, List<string>>();
-        foreach (var file in FileSystemHelper.EnumerateFilesSafe(options.RootPath, true, token))
+        // 整盘枚举是同步操作，若放在首个 await 之前会直接阻塞调用方（UI 线程）。
+        // 把整个方法体放进 Task.Run，保证从第一行起就运行在后台线程。
+        return Task.Run<IReadOnlyList<DuplicateGroup>>(async () =>
         {
-            if (token.IsCancellationRequested) break;
-            if (file.Length < options.MinimumSizeBytes) continue;
-            if (!bySize.TryGetValue(file.Length, out var list))
+            status?.Report("正在枚举文件并按大小分组");
+            var bySize = new Dictionary<long, List<string>>();
+            foreach (var file in FileSystemHelper.EnumerateFilesSafe(options.RootPath, true, token))
             {
-                list = new List<string>();
-                bySize[file.Length] = list;
-            }
-            list.Add(file.FullName);
-        }
-
-        var groups = new List<DuplicateGroup>();
-        var candidates = bySize.Values.Where(list => list.Count > 1).ToList();
-        var processed = 0;
-        foreach (var sizeGroup in candidates)
-        {
-            if (token.IsCancellationRequested) break;
-            processed++;
-            if (processed % 20 == 0) status?.Report($"正在比对内容：{processed}/{candidates.Count} 组");
-
-            // 第一层：快速指纹（长度 + 头尾 8 KB）
-            var byFingerprint = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var path in sizeGroup)
-            {
-                try
+                token.ThrowIfCancellationRequested();
+                if (!TryGetFileStats(file.FullName, out var size, out _)) continue;
+                if (size < options.MinimumSizeBytes) continue;
+                if (!bySize.TryGetValue(size, out var list))
                 {
-                    var fingerprint = await HashHelper.ComputeQuickFingerprintAsync(path, token);
-                    if (!byFingerprint.TryGetValue(fingerprint, out var list))
-                    {
-                        list = new List<string>();
-                        byFingerprint[fingerprint] = list;
-                    }
-                    list.Add(path);
+                    list = new List<string>();
+                    bySize[size] = list;
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { }
+                list.Add(file.FullName);
             }
 
-            // 第二层：只有候选组才做完整 SHA256 比对，确保「内容完全一致」
-            foreach (var quickGroup in byFingerprint.Values.Where(list => list.Count > 1))
+            var groups = new List<DuplicateGroup>();
+            var candidates = bySize.Values.Where(list => list.Count > 1).ToList();
+            var processed = 0;
+            foreach (var sizeGroup in candidates)
             {
-                var byHash = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var path in quickGroup)
+                token.ThrowIfCancellationRequested();
+                processed++;
+                if (processed % 20 == 0) status?.Report($"正在比对内容：{processed}/{candidates.Count} 组");
+
+                // 第一层：快速指纹（长度 + 头尾 8 KB）
+                var byFingerprint = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in sizeGroup)
                 {
-                    if (token.IsCancellationRequested) break;
                     try
                     {
-                        var hash = await HashHelper.ComputeSha256Async(path, token);
-                        if (!byHash.TryGetValue(hash, out var list))
+                        var fingerprint = await HashHelper.ComputeQuickFingerprintAsync(path, token);
+                        if (!byFingerprint.TryGetValue(fingerprint, out var list))
                         {
                             list = new List<string>();
-                            byHash[hash] = list;
+                            byFingerprint[fingerprint] = list;
                         }
                         list.Add(path);
                     }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                    // OperationCanceledException 不在此吞掉，交由 Task 正常取消
                 }
 
-                foreach (var (hash, paths) in byHash.Where(pair => pair.Value.Count > 1))
+                // 第二层：只有候选组才做完整 SHA256 比对，确保「内容完全一致」
+                foreach (var quickGroup in byFingerprint.Values.Where(list => list.Count > 1))
                 {
-                    groups.Add(new DuplicateGroup
+                    var byHash = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var path in quickGroup)
                     {
-                        Hash = hash,
-                        SizeBytes = sizeGroup.Count > 0 ? new FileInfo(paths[0]).Length : 0,
-                        Files = paths.Select(p =>
+                        token.ThrowIfCancellationRequested();
+                        try
                         {
-                            var info = new FileInfo(p);
-                            return ToEntry(p, info.Length, info.LastWriteTime, hash);
-                        }).ToArray()
-                    });
-                    if (groups.Count >= options.MaxResults) return groups;
+                            var hash = await HashHelper.ComputeSha256Async(path, token);
+                            if (!byHash.TryGetValue(hash, out var list))
+                            {
+                                list = new List<string>();
+                                byHash[hash] = list;
+                            }
+                            list.Add(path);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                        // 取消异常继续向上传播
+                    }
+
+                    foreach (var (hash, paths) in byHash.Where(pair => pair.Value.Count > 1))
+                    {
+                        var entries = new List<FileEntry>();
+                        foreach (var path in paths)
+                        {
+                            if (!TryGetFileStats(path, out var entrySize, out var lastWrite)) continue;
+                            entries.Add(ToEntry(path, entrySize, lastWrite, hash));
+                        }
+                        if (entries.Count == 0) continue;
+
+                        groups.Add(new DuplicateGroup
+                        {
+                            Hash = hash,
+                            SizeBytes = entries[0].SizeBytes,
+                            Files = entries.ToArray()
+                        });
+                        if (groups.Count >= options.MaxResults) return groups;
+                    }
                 }
             }
+            status?.Report($"扫描完成，发现 {groups.Count} 组重复文件");
+            return groups;
+        }, token);
+    }
+
+    /// <summary>安全读取 FileInfo，失效 / 被删除 / 无权限的文件直接跳过。</summary>
+    private static bool TryGetFileStats(string path, out long size, out DateTime lastWrite)
+    {
+        size = 0;
+        lastWrite = DateTime.MinValue;
+        try
+        {
+            var info = new FileInfo(path);
+            size = info.Length;
+            lastWrite = info.LastWriteTime;
+            return true;
         }
-        status?.Report($"扫描完成，发现 {groups.Count} 组重复文件");
-        return groups;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static FileEntry ToEntry(string path, long size, DateTime lastWrite, string hash = "") => new()

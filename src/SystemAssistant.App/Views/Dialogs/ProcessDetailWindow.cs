@@ -13,6 +13,7 @@ public sealed class ProcessDetailWindow : Window
     public ProcessDetailWindow(ProcessSnapshot process,
         IReadOnlyList<ProcessModuleInfo> modules, IReadOnlyList<ProcessHandleInfo> handles)
     {
+        AppIcon.Apply(this);
         Title = $"{process.Name} (PID {process.ProcessId})";
         Width = 900;
         Height = 560;
@@ -23,7 +24,7 @@ public sealed class ProcessDetailWindow : Window
         header.Children.Add(new TextBlock
         {
             Text = $"{process.ExecutablePath}   |   CPU {process.CpuPercent:F1} %   |   " +
-                   $"线程 {process.ThreadCount}   |   {process.UserName}",
+                   $"{LocalizationService.Instance.Get("Process_Threads")} {process.ThreadCount}   |   {process.UserName}",
             Opacity = 0.7,
             TextWrapping = TextWrapping.Wrap
         });
@@ -31,7 +32,7 @@ public sealed class ProcessDetailWindow : Window
         var moduleBox = new ListBox
         {
             ItemsSource = modules.Count == 0
-                ? new[] { "（无权限或进程已退出，无法读取模块）" }
+                ? new[] { LocalizationService.Instance.Get("Process_DetailNoModules") }
                 : modules.Select(m => $"{m.Name}   {m.FileName}   [{m.Version}]").ToArray(),
             FontFamily = new FontFamily("Consolas, Courier New, monospace"),
             FontSize = 11
@@ -39,18 +40,19 @@ public sealed class ProcessDetailWindow : Window
         var handleBox = new ListBox
         {
             ItemsSource = handles.Count == 0
-                ? new[] { "（系统保护进程或权限不足，无法枚举句柄）" }
+                ? new[] { LocalizationService.Instance.Get("Process_DetailNoHandles") }
                 : handles.Select(h => $"0x{h.HandleValue:X}   {h.ObjectType}   {h.ObjectName}").ToArray(),
             FontFamily = new FontFamily("Consolas, Courier New, monospace"),
             FontSize = 11
         };
 
+        // TabItem.Header 用带 Loc.Key 的 TextBlock，语言切换时即时更新。
         var tabs = new TabControl
         {
             Items =
             {
-                new TabItem { Header = LocalizationService.Instance.Get("Process_Modules"), Content = moduleBox },
-                new TabItem { Header = LocalizationService.Instance.Get("Process_Handles"), Content = handleBox }
+                new TabItem { Header = LocalizedHeader("Process_Modules"), Content = moduleBox },
+                new TabItem { Header = LocalizedHeader("Process_Handles"), Content = handleBox }
             }
         };
 
@@ -59,5 +61,12 @@ public sealed class ProcessDetailWindow : Window
         root.Children.Add(header);
         root.Children.Add(tabs);
         Content = root;
+    }
+
+    private static TextBlock LocalizedHeader(string key)
+    {
+        var text = new TextBlock { FontSize = 13 };
+        Localize.SetKey(text, key);
+        return text;
     }
 }

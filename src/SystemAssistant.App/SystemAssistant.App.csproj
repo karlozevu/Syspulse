@@ -6,8 +6,14 @@
     <RootNamespace>SystemAssistant.App</RootNamespace>
     <AssemblyName>SystemAssistant</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Win32 exe 图标（资源管理器、任务栏、快捷方式都会使用它） -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Avalonia 窗口图标用 PNG（Skia 解码器对 PNG 支持最稳妥），ICO 供 Win32 使用 -->
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.23" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />

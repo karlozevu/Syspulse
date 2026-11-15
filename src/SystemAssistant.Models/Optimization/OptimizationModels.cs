@@ -67,6 +67,13 @@ public enum TuningRisk
     Dangerous
 }
 
+/// <summary>调优项所在的注册表根键。避免用路径字符串推断 Hive（HKCU 的 Software 会被误判为 HKLM）。</summary>
+public enum TuningRegistryHive
+{
+    CurrentUser,
+    LocalMachine
+}
+
 /// <summary>系统调优开关项。任何修改都必须由用户主动确认，程序不会自动应用。</summary>
 public sealed class TuningItem
 {
@@ -78,6 +85,13 @@ public sealed class TuningItem
     public bool CurrentValue { get; init; }
     public string RegistryPath { get; init; } = string.Empty;
     public string ValueName { get; init; } = string.Empty;
+
+    /// <summary>显式指定根键，取代从 RegistryPath 字符串推断。</summary>
+    public TuningRegistryHive Hive { get; init; } = TuningRegistryHive.CurrentUser;
+
+    /// <summary>该注册表值在 Windows 中的默认值（键 / 值不存在时据此判断开关状态）。</summary>
+    public int DefaultValue { get; init; }
+
     public int EnabledValue { get; init; } = 1;
     public int DisabledValue { get; init; }
 }

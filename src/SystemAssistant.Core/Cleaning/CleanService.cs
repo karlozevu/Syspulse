@@ -18,6 +18,20 @@ public sealed class CleanService : ICleanService
     private readonly IReadOnlyList<IScanProvider> _providers;
     private volatile bool _registryBackupDone;
 
+    /// <summary>
+    /// 允许删除的注册表父键（含 hive）。必须与 <see cref="RegistryScanProvider"/> 实际扫描过的
+    /// 路径严格一致；删除阶段据此拒绝 UI 传入的任意 HKLM/HKCU 路径，防止越权删除。
+    /// </summary>
+    private static readonly HashSet<string> AllowedRegistryParents = new(StringComparer.OrdinalIgnoreCase)
+    {
+        @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        @"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+        @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+        @"HKCU\Software\Classes"
+    };
+
     public CleanService(ISettingsService settings, IOperationLogService log)
     {
         _settings = settings;
@@ -58,9 +72,11 @@ public sealed class CleanService : ICleanService
         }
 
         // 去重：同一路径可能被多个提供者命中（例如用户临时目录同时是应用缓存目录）
+        var maxItems = options.MaxFileCount > 0 ? options.MaxFileCount : int.MaxValue;
         var distinct = items.GroupBy(i => i.Path, StringComparer.OrdinalIgnoreCase)
             .Select(g => g.OrderBy(i => (int)i.Risk).First())
             .OrderBy(i => (int)i.Category).ThenByDescending(i => i.SizeBytes)
+            .Take(maxItems)
             .ToArray();
 
         var groups = distinct.GroupBy(i => i.Category)
@@ -207,6 +223,14 @@ public sealed class CleanService : ICleanService
 
         var keyName = parts[^1];
         var parentPath = string.Join('\\', parts.Skip(1).Take(parts.Length - 2));
+
+        // 只接受扫描器确实报告过的父键，拒绝任意 HKLM/HKCU 路径
+        if (!AllowedRegistryParents.Contains($"{hive}\\{parentPath}"))
+            return (false, "父键不在注册表扫描白名单内，拒绝删除");
+        if (string.IsNullOrWhiteSpace(keyName) || keyName is "." or ".."
+            || keyName.IndexOfAny(new[] { '/', '\\', '"' }) >= 0)
+            return (false, "注册表子键名非法");
+
         try
         {
             using var parent = RegistryScanProvider.OpenKey(hive, parentPath, writable: true);
@@ -226,8 +250,14 @@ public sealed class CleanService : ICleanService
         try
         {
             var names = new[] { "msedge", "chrome", "firefox" };
-            return System.Diagnostics.Process.GetProcesses().Any(p => names.Contains(
-                p.ProcessName, StringComparer.OrdinalIgnoreCase));
+            foreach (var process in System.Diagnostics.Process.GetProcesses())
+            {
+                using (process)
+                {
+                    if (names.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase)) return true;
+                }
+            }
+            return false;
         }
         catch
         {

@@ -35,7 +35,7 @@ public static partial class PageViewLocator
 
         var toolbar = UiFactory.Toolbar(
             UiFactory.Button("Cleaner_Scan", vm.ScanCommand, accent: true),
-            UiFactory.Button("Cleaner_Execute", vm.CleanCommand),
+            UiFactory.Button("Cleaner_Execute", vm.CleanCommand, variant: ButtonVariant.Danger),
             UiFactory.Button("Cleaner_Backup", vm.BackupRegistryCommand),
             UiFactory.Button("Common_UnselectAll", vm.SelectNoneCommand));
 
@@ -52,7 +52,9 @@ public static partial class PageViewLocator
                     Col("Common_Size", 100, o => FormatHelper.FormatBytes(((ScanItem)o).SizeBytes)),
                     Col("Common_Risk", 70, o => ((ScanItem)o).Risk switch
                     {
-                        RiskLevel.High => "高", RiskLevel.Medium => "中", _ => "低"
+                        RiskLevel.High => LocalizationService.Instance.Get("Risk_High"),
+                        RiskLevel.Medium => LocalizationService.Instance.Get("Risk_Medium"),
+                        _ => LocalizationService.Instance.Get("Risk_Low")
                     }),
                     Col("Common_Path", 500, o => ((ScanItem)o).Path, stretch: true)
                 }, withCheckBox: true,
@@ -62,7 +64,7 @@ public static partial class PageViewLocator
 
                 var expander = new Expander
                 {
-                    Header = $"{group.Title}   ({group.Items.Count} 项 / {FormatHelper.FormatBytes(group.TotalSizeBytes)})",
+                    Header = $"{group.Title}   ({group.Items.Count} {LocalizationService.Instance.Get("Common_ItemsUnit")} / {FormatHelper.FormatBytes(group.TotalSizeBytes)})",
                     Content = table,
                     IsExpanded = group.Category is ScanCategory.SystemTemp or ScanCategory.BrowserCache,
                     Margin = new Thickness(0, 0, 0, 4)
@@ -126,7 +128,7 @@ public static partial class PageViewLocator
                     UiFactory.Button("Common_Refresh", vm.RefreshStartupCommand),
                     UiFactory.Button("Common_Enable", vm.EnableStartupCommand),
                     UiFactory.Button("Common_Disable", vm.DisableStartupCommand),
-                    UiFactory.Button("Common_Delete", vm.DeleteStartupCommand)),
+                    UiFactory.Button("Common_Delete", vm.DeleteStartupCommand, variant: ButtonVariant.Danger)),
                 startupTable
             }
         };
@@ -139,7 +141,7 @@ public static partial class PageViewLocator
             Col("Common_Value", 170, o => ((WindowsServiceInfo)o).ServiceName),
             Col("Common_Status", 100, o => ((WindowsServiceInfo)o).State.ToString()),
             Col("Optimize_StartMode", 150, o => ((WindowsServiceInfo)o).StartMode.ToString()),
-            Col("Common_Risk", 280, o => ((WindowsServiceInfo)o).IsHighRisk ? "⚠ 高风险" : string.Empty, stretch: true)
+            Col("Common_Risk", 280, o => ((WindowsServiceInfo)o).IsHighRisk ? LocalizationService.Instance.Get("Optimize_HighRiskService") : string.Empty, stretch: true)
         });
         serviceTable.SelectionChanged += item => vm.SelectedService = item as WindowsServiceInfo;
         vm.PropertyChanged += (_, e) =>
@@ -152,10 +154,10 @@ public static partial class PageViewLocator
         startModeCombo.SelectedIndex = 2;
         var setModeButton = new Button
         {
-            Content = LocalizationService.Instance.Get("Optimize_StartMode"),
             Command = vm.SetStartModeCommand,
             CommandParameter = "Manual"
         };
+        SystemAssistant.App.Services.Localize.SetKey(setModeButton, "Optimize_StartMode");
         startModeCombo.SelectionChanged += (_, _) =>
             setModeButton.CommandParameter = startModeCombo.SelectedItem as string ?? "Manual";
 
@@ -195,7 +197,7 @@ public static partial class PageViewLocator
             UiFactory.Button("Optimize_Dism", vm.DismCommand),
             UiFactory.Button("Optimize_Console", new RelayCommand(() =>
             {
-                var window = new SystemAssistant.App.Views.Dialogs.ConsoleWindow(LocalizationService.Instance.Get("Optimize_Console"));
+                var window = new SystemAssistant.App.Views.Dialogs.ConsoleWindow("Optimize_Console");
                 void Handler(string line, bool isError) => window.Append(line, isError);
                 vm.OutputLine += Handler;
                 window.Closed += (_, _) => vm.OutputLine -= Handler;
@@ -207,14 +209,14 @@ public static partial class PageViewLocator
         // 磁盘维护
         var diskCombo = new ComboBox { Width = 320 };
         foreach (var item in vm.Disks)
-            diskCombo.Items.Add($"磁盘 {item.DiskIndex}  {item.Model}  [{item.MediaTypeText}]");
+            diskCombo.Items.Add($"Disk {item.DiskIndex} · {item.Model} [{item.MediaTypeText}]");
         diskCombo.SelectedIndex = vm.Disks.Count > 0 ? 0 : -1;
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(OptimizationViewModel.Disks)) return;
             diskCombo.Items.Clear();
             foreach (var item in vm.Disks)
-                diskCombo.Items.Add($"磁盘 {item.DiskIndex}  {item.Model}  [{item.MediaTypeText}]");
+                diskCombo.Items.Add($"Disk {item.DiskIndex} · {item.Model} [{item.MediaTypeText}]");
             if (vm.Disks.Count > 0) diskCombo.SelectedIndex = 0;
         };
         diskCombo.SelectionChanged += (_, _) =>
@@ -237,6 +239,8 @@ public static partial class PageViewLocator
             UiFactory.Button("Optimize_FlushDns", vm.FlushDnsCommand),
             UiFactory.Button("Optimize_ResetWinsock", vm.ResetWinsockCommand),
             UiFactory.Button("Optimize_ResetTcpIp", vm.ResetTcpIpCommand));
+        // 与服务 / 修复 / 磁盘维护页保持一致：非管理员禁用需要提权的网络重置命令。
+        foreach (var button in networkButtons.Children.OfType<Button>()) button.IsEnabled = vm.IsAdministrator;
         var network = new StackPanel
         {
             Children =
@@ -319,8 +323,8 @@ public static partial class PageViewLocator
         vm.ProcessesUpdated += () => table.SetItems(vm.Processes);
 
         var toolbar = UiFactory.Toolbar(
-            UiFactory.Button("Process_Kill", vm.KillCommand),
-            UiFactory.Button("Process_KillTree", vm.KillTreeCommand),
+            UiFactory.Button("Process_Kill", vm.KillCommand, variant: ButtonVariant.Danger),
+            UiFactory.Button("Process_KillTree", vm.KillTreeCommand, variant: ButtonVariant.Danger),
             UiFactory.Button("Process_Details", vm.DetailsCommand),
             UiFactory.Button("Process_Dashboard", vm.DashboardCommand));
         var body = new StackPanel { Children = { toolbar, table } };

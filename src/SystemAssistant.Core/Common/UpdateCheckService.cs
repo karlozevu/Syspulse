@@ -13,7 +13,10 @@ namespace SystemAssistant.Core.Common;
 public sealed class UpdateCheckService : IUpdateCheckService
 {
     private readonly Func<string> _getUrl;
-    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
+
+    // 静态复用：HttpClient 实现 IDisposable，逐实例创建会耗尽套接字；
+    // 全局共享一个实例即可，无需让本服务再实现 IDisposable（App 层无需改动）。
+    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
 
     public UpdateCheckService(Func<string> getUrl) => _getUrl = getUrl;
 
@@ -33,9 +36,20 @@ public sealed class UpdateCheckService : IUpdateCheckService
             };
         }
 
+        // 必须是 https 绝对地址：校验 URL 格式并强制加密传输，避免明文 / 协议走私
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            return new AppVersionInfo
+            {
+                CurrentVersion = CurrentVersion,
+                Message = "更新检测地址无效（必须为 https 绝对地址），已跳过联网检测"
+            };
+        }
+
         try
         {
-            using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token);
+            using var response = await HttpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token);
             if (!response.IsSuccessStatusCode)
             {
                 return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = $"检测失败：HTTP {(int)response.StatusCode}" };
@@ -57,7 +71,8 @@ public sealed class UpdateCheckService : IUpdateCheckService
                 Message = "检测完成"
             };
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException
+                                      or JsonException or IOException or UriFormatException)
         {
             return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = "更新检测不可用：" + ex.Message };
         }

@@ -219,11 +219,10 @@ public sealed class StartupItemService : IStartupItemService
     {
         try
         {
-            var baseKey = RegistryKey.OpenBaseKey(
+            // baseKey 无论是否成功打开子键都要释放；返回的子键持有独立句柄，由调用方 using 释放
+            using var baseKey = RegistryKey.OpenBaseKey(
                 hive == "HKLM" ? RegistryHive.LocalMachine : RegistryHive.CurrentUser, RegistryView.Registry64);
-            var key = writable ? baseKey.OpenSubKey(subKey, true) : baseKey.OpenSubKey(subKey);
-            if (key is null) baseKey.Dispose();
-            return key;
+            return writable ? baseKey.OpenSubKey(subKey, true) : baseKey.OpenSubKey(subKey);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

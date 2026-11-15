@@ -177,7 +177,7 @@ public sealed class ToolboxViewModel : ViewModelBase
                 removable.AddRange(selected);
             }
             if (blocked > 0)
-                StatusMessage = $"已跳过 {blocked} 组「整组勾选」的重复文件，每组至少保留一份";
+                StatusMessage = LF("Toolbox_GroupProtected", blocked);
             entries = removable.ToArray();
         }
         if (entries.Length == 0) return;

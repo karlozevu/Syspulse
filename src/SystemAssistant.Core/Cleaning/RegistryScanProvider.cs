@@ -179,12 +179,12 @@ internal sealed class RegistryScanProvider : IScanProvider
     {
         try
         {
-            var baseKey = hive.Equals("HKCU", StringComparison.OrdinalIgnoreCase)
+            // baseKey 无论是否成功打开子键都必须释放；返回的 subKey 持有独立的句柄，
+            // 不受 baseKey 释放影响，由调用方 using 释放。
+            using var baseKey = hive.Equals("HKCU", StringComparison.OrdinalIgnoreCase)
                 ? RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64)
                 : RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            var key = writable ? baseKey.OpenSubKey(subKey, true) : baseKey.OpenSubKey(subKey);
-            if (key is null) baseKey.Dispose();
-            return key;
+            return writable ? baseKey.OpenSubKey(subKey, true) : baseKey.OpenSubKey(subKey);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

@@ -24,6 +24,8 @@ public sealed class SystemTuningService : ISystemTuningService
             Risk = TuningRisk.Safe,
             RegistryPath = @"Control Panel\Desktop\WindowMetrics",
             ValueName = "MinAnimate",
+            Hive = TuningRegistryHive.CurrentUser,
+            DefaultValue = 1,
             EnabledValue = 1,
             DisabledValue = 0
         },
@@ -36,6 +38,8 @@ public sealed class SystemTuningService : ISystemTuningService
             Risk = TuningRisk.Dangerous,
             RegistryPath = @"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
             ValueName = "AllowTelemetry",
+            Hive = TuningRegistryHive.LocalMachine,
+            DefaultValue = 1,
             EnabledValue = 1,
             DisabledValue = 0
         },
@@ -48,9 +52,20 @@ public sealed class SystemTuningService : ISystemTuningService
             Risk = TuningRisk.Safe,
             RegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
             ValueName = "Start_TrackProgs",
-            EnabledValue = 1,
-            DisabledValue = 0
+            Hive = TuningRegistryHive.CurrentUser,
+            // Start_TrackProgs：1 = 跟踪程序 / 显示建议，0 = 关闭建议。
+            // 本项是「关闭建议」开关，因此「开启该调优」必须写 0，不能写 1。
+            DefaultValue = 1,
+            EnabledValue = 0,
+            DisabledValue = 1
         }
+    };
+
+    /// <summary>把 UI 无关的根键枚举映射到 Microsoft.Win32.RegistryHive。</summary>
+    private static RegistryHive ToRegistryHive(TuningRegistryHive hive) => hive switch
+    {
+        TuningRegistryHive.LocalMachine => RegistryHive.LocalMachine,
+        _ => RegistryHive.CurrentUser
     };
 
     public SystemTuningService(IOperationLogService log) => _log = log;
@@ -65,6 +80,8 @@ public sealed class SystemTuningService : ISystemTuningService
             Risk = item.Risk,
             RegistryPath = item.RegistryPath,
             ValueName = item.ValueName,
+            Hive = item.Hive,
+            DefaultValue = item.DefaultValue,
             EnabledValue = item.EnabledValue,
             DisabledValue = item.DisabledValue,
             CurrentValue = ReadValue(item)
@@ -78,9 +95,7 @@ public sealed class SystemTuningService : ISystemTuningService
 
         try
         {
-            var hive = definition.RegistryPath.StartsWith("SOFTWARE", StringComparison.OrdinalIgnoreCase)
-                ? RegistryHive.LocalMachine : RegistryHive.CurrentUser;
-            using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
+            using var baseKey = RegistryKey.OpenBaseKey(ToRegistryHive(definition.Hive), RegistryView.Registry64);
             using var key = baseKey.CreateSubKey(definition.RegistryPath, writable: true);
             if (key is null) return OperationResult.Fail("无法打开注册表键，可能需要管理员权限");
             key.SetValue(definition.ValueName, enabled ? definition.EnabledValue : definition.DisabledValue,
@@ -104,7 +119,13 @@ public sealed class SystemTuningService : ISystemTuningService
             using var key = Registry.LocalMachine.OpenSubKey(
                 @"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management");
             var pagingFiles = key?.GetValue("PagingFiles") as string[] ?? Array.Empty<string>();
-            var automatic = pagingFiles.Length == 0;
+            // PagingFiles 为空、或任一页面文件配置为「0 0」（初始 / 最大值都为 0）
+            // 都表示由 Windows 自动管理；仅按 Length==0 判断会漏掉「?:\pagefile.sys 0 0」。
+            var automatic = pagingFiles.Length == 0 || pagingFiles.Any(p =>
+            {
+                var parts = p.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                return parts.Length >= 3 && parts[1] == "0" && parts[2] == "0";
+            });
             long initial = 0, maximum = 0;
             if (!automatic)
             {
@@ -135,19 +156,20 @@ public sealed class SystemTuningService : ISystemTuningService
 
     private static bool ReadValue(TuningItem item)
     {
+        // 键 / 值不存在或读取失败时，按该项的 Windows 默认值推导开关状态，而不是恒返回 false。
+        var effective = item.DefaultValue;
         try
         {
-            var hive = item.RegistryPath.StartsWith("SOFTWARE", StringComparison.OrdinalIgnoreCase)
-                ? RegistryHive.LocalMachine : RegistryHive.CurrentUser;
-            using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
+            using var baseKey = RegistryKey.OpenBaseKey(ToRegistryHive(item.Hive), RegistryView.Registry64);
             using var key = baseKey.OpenSubKey(item.RegistryPath);
             var value = key?.GetValue(item.ValueName);
-            if (value is null) return item.DisabledValue != 0; // 键不存在时按「未显式配置」处理
-            return Convert.ToInt32(value) != item.DisabledValue;
+            if (value is not null) effective = Convert.ToInt32(value);
         }
         catch
         {
-            return false;
+            effective = item.DefaultValue;
         }
+        // 「开启」状态即当前原始值等于 EnabledValue（其余情况视为关闭 / 未配置）
+        return effective == item.EnabledValue;
     }
 }

@@ -62,7 +62,9 @@ public sealed class HardwareInfoService : IHardwareInfoService
     private static OperatingSystemInfo BuildOperatingSystem()
     {
         var os = First(CimV2, "Win32_OperatingSystem");
-        var caption = os?.String("Caption") ?? RuntimeInformation.OSDescription;
+        // WmiObject.String() 恒返回非 null（缺失时是空串），因此必须显式判空再回落
+        var caption = os?.String("Caption");
+        if (string.IsNullOrWhiteSpace(caption)) caption = RuntimeInformation.OSDescription;
 
         // Win32_OperatingSystem.Caption 在 Windows 11 上仍显示 "Windows 10"，
         // 因此读取注册表补充 DisplayVersion / UBR 得到更准确的展示名。
@@ -83,16 +85,20 @@ public sealed class HardwareInfoService : IHardwareInfoService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
 
-        var build = os?.String("BuildNumber", "Version") ?? currentBuild;
+        var build = os?.String("BuildNumber", "Version");
+        if (string.IsNullOrWhiteSpace(build)) build = currentBuild;
         if (!string.IsNullOrEmpty(ubr)) build += "." + ubr;
         if (!string.IsNullOrEmpty(displayVersion)) caption += $" ({displayVersion})";
         if (!string.IsNullOrEmpty(productName) && !caption.Contains(productName, StringComparison.OrdinalIgnoreCase))
             caption += " · " + productName;
 
+        var version = os?.String("Version");
+        if (string.IsNullOrWhiteSpace(version)) version = Environment.OSVersion.Version.ToString();
+
         return new OperatingSystemInfo
         {
             Caption = caption,
-            Version = os?.String("Version") ?? Environment.OSVersion.Version.ToString(),
+            Version = version,
             BuildNumber = build,
             Architecture = RuntimeInformation.OSArchitecture.ToString(),
             InstallDate = FormatHelper.FormatCimDateTime(os?.String("InstallDate")),
@@ -282,7 +288,7 @@ public sealed class HardwareInfoService : IHardwareInfoService
             {
                 var shortName = gpu.Name.Split('(')[0].Trim();
                 var keyword = shortName.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? shortName;
-                return r.HardwareName.Contains(keyword, StringComparison.OrdinalIgnoreCase) || readings.Count <= 8;
+                return r.HardwareName.Contains(keyword, StringComparison.OrdinalIgnoreCase);
             }).ToList();
 
             var temperature = matched.Where(r => r.Kind == SensorKind.Temperature).Select(r => r.Value).ToList();
@@ -433,16 +439,31 @@ public sealed class HardwareInfoService : IHardwareInfoService
                                    | ((long)data[offset + 7] << 16)
                                    | ((long)data[offset + 8] << 24);
                         var name = SmartAttributeNames.TryGetValue(id, out var n) ? n : $"属性 0x{id:X2}";
-                        var critical = id is 5 or 197 or 198 or 200 or 202;
+                        var current = data[offset + 3];
+                        var worst = data[offset + 4];
+                        var threshold = data[offset + 11];
+                        // 这些「不良事件计数」类属性只要原始值 > 0 即代表已出现异常
+                        var rawCritical = id is 5 or 197 or 198 or 200;
+                        // 202（剩余寿命）、233（介质磨损）、177（磨损均衡）是寿命 / 归一化值属性，
+                        // 其 raw 通常是「剩余百分比」等恒大于 0 的值，绝不能用 raw > 0 判告警（否则 SSD 恒告警）。
+                        // 这类属性按归一化 Current/Worst 是否触及厂商 Threshold 判断。
+                        var lifeAttribute = id is 202 or 233 or 177;
+                        bool isWarning;
+                        if (rawCritical)
+                            isWarning = raw > 0;
+                        else if (lifeAttribute)
+                            isWarning = threshold > 0 && (current <= threshold || worst <= threshold);
+                        else
+                            isWarning = false;
                         attributes.Add(new SmartAttributeItem
                         {
                             Id = id,
                             Name = name,
-                            CurrentValue = data[offset + 3],
-                            WorstValue = data[offset + 4],
-                            Threshold = data[offset + 11],
+                            CurrentValue = current,
+                            WorstValue = worst,
+                            Threshold = threshold,
                             RawValue = raw,
-                            IsWarning = critical && raw > 0
+                            IsWarning = isWarning
                         });
                         if (id == 194) temperature = raw & 0xFF;
                         if (id == 9) powerOnHours = (int)Math.Min(raw, int.MaxValue);
@@ -513,14 +534,8 @@ public sealed class HardwareInfoService : IHardwareInfoService
         var remaining = status?.Int32("RemainingCapacity") ?? 0;
         var cycleCount = staticData?.Int32("CycleCount") ?? -1;
 
-        // 部分设备只报告百分比，用设计容量折算，避免损耗率显示为 100%
-        if (full == 0 && design > 0)
-        {
-            var percent = win32Battery?.Int32("EstimatedChargeRemaining") ?? 0;
-            full = design;
-            remaining = (int)(design * percent / 100.0);
-        }
-
+        // 满充容量缺失时绝不能拿设计容量冒充：那会让损耗率恒显示为 0%（完全失真）。
+        // 保留 full = 0 并标记容量信息未知，由界面显示「未知」而不是伪造一个健康的损耗率。
         return new BatteryInfo
         {
             IsPresent = true,

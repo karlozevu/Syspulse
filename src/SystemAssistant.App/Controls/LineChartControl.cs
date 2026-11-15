@@ -36,8 +36,8 @@ public sealed class LineChartControl : Control
 
     public LineChartControl()
     {
-        MinHeight = 110;
-        Height = 130;
+        MinHeight = 120;
+        HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
         TitleProperty.Changed.AddClassHandler<LineChartControl>((_, _) => InvalidateVisual());
     }
 
@@ -60,25 +60,29 @@ public sealed class LineChartControl : Control
 
         var isDark = Application.Current?.ActualThemeVariant == ThemeVariant.Dark;
         var textBrush = new SolidColorBrush(isDark ? Color.FromRgb(230, 230, 230) : Color.FromRgb(40, 45, 50));
-        var gridBrush = new SolidColorBrush(isDark ? Color.FromArgb(50, 255, 255, 255) : Color.FromArgb(45, 0, 0, 0));
+        var axisBrush = new SolidColorBrush(isDark ? Color.FromArgb(120, 255, 255, 255) : Color.FromArgb(90, 0, 0, 0));
+        var gridBrush = new SolidColorBrush(isDark ? Color.FromArgb(38, 255, 255, 255) : Color.FromArgb(28, 0, 0, 0));
         var gridPen = new Pen(gridBrush, 1);
 
-        const double left = 8, right = 8, top = 26, bottom = 18;
+        const double left = 10, right = 10, top = 30, bottom = 20;
         var chartWidth = Math.Max(1, width - left - right);
         var chartHeight = Math.Max(1, height - top - bottom);
-
-        // 水平网格线
-        for (var i = 0; i <= 3; i++)
-        {
-            var y = top + chartHeight * i / 3.0;
-            context.DrawLine(gridPen, new Point(left, y), new Point(width - right, y));
-        }
+        var baseline = top + chartHeight;
 
         // 标题与当前值
         var current = _values.Count > 0 ? _values[^1].ToString("F1", CultureInfo.CurrentCulture) : "--";
         DrawText(context, $"{Title}   {current} {Unit}".Trim(), new Point(left, 5), textBrush, 11, true);
 
-        if (_values.Count < 2) return;
+        if (_values.Count < 2)
+        {
+            for (var i = 0; i <= 3; i++)
+            {
+                var y = top + chartHeight * i / 3.0;
+                context.DrawLine(gridPen, new Point(left, y), new Point(width - right, y));
+            }
+            DrawText(context, "--", new Point(width - right - 26, top + chartHeight / 2), axisBrush, 10);
+            return;
+        }
 
         var min = _values.Min();
         var max = _values.Max();
@@ -94,31 +98,60 @@ public sealed class LineChartControl : Control
             min -= padding;
         }
 
-        var strokePen = new Pen(_stroke, 2);
+        // 四条水平网格线 + 纵轴刻度
+        for (var i = 0; i <= 3; i++)
+        {
+            var y = top + chartHeight * i / 3.0;
+            context.DrawLine(gridPen, new Point(left, y), new Point(width - right, y));
+            var tick = max - (max - min) * i / 3.0;
+            DrawText(context, tick.ToString("F0", CultureInfo.CurrentCulture),
+                new Point(left + 2, Math.Min(baseline - 11, y + 1)), axisBrush, 9);
+        }
+
         var points = new Point[_values.Count];
         for (var i = 0; i < _values.Count; i++)
         {
             var x = left + chartWidth * i / Math.Max(1, _values.Count - 1);
             var normalized = (_values[i] - min) / (max - min);
-            var y = top + chartHeight * (1 - normalized);
-            points[i] = new Point(x, y);
+            points[i] = new Point(x, top + chartHeight * (1 - normalized));
         }
+
+        // 曲线下方渐变填充，让趋势与幅度一眼可辨
+        var strokeColor = (_stroke as SolidColorBrush)?.Color ?? Colors.DodgerBlue;
+        var fill = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative)
+        };
+        fill.GradientStops.Add(new GradientStop(Color.FromArgb(85, strokeColor.R, strokeColor.G, strokeColor.B), 0));
+        fill.GradientStops.Add(new GradientStop(Color.FromArgb(6, strokeColor.R, strokeColor.G, strokeColor.B), 1));
+
+        var geometry = new StreamGeometry();
+        using (var geoContext = geometry.Open())
+        {
+            geoContext.BeginFigure(new Point(points[0].X, baseline), true);
+            geoContext.LineTo(points[0]);
+            for (var i = 1; i < points.Length; i++) geoContext.LineTo(points[i]);
+            geoContext.LineTo(new Point(points[^1].X, baseline));
+            geoContext.EndFigure(true);
+        }
+        context.DrawGeometry(fill, null, geometry);
+
+        var strokePen = new Pen(_stroke, 2.2, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
         for (var i = 1; i < points.Length; i++)
             context.DrawLine(strokePen, points[i - 1], points[i]);
 
-        // 末尾高亮圆点
-        context.DrawEllipse(_stroke, null, points[^1], 3, 3);
-
-        DrawText(context, max.ToString("F0", CultureInfo.CurrentCulture), new Point(left, top - 2), textBrush, 9);
-        DrawText(context, min.ToString("F0", CultureInfo.CurrentCulture),
-            new Point(left, top + chartHeight - 12), textBrush, 9);
+        // 末尾高亮圆点 + 采样点数
+        context.DrawEllipse(_stroke, new Pen(textBrush, 1), points[^1], 3.5, 3.5);
+        DrawText(context, $"{_values.Count} pts",
+            new Point(Math.Max(left, width - right - 42), height - 14), axisBrush, 9);
     }
 
     private static void DrawText(DrawingContext context, string text, Point origin,
         IBrush brush, double size, bool bold = false)
     {
         var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-            new Typeface(FontFamily.Default, bold ? FontStyle.Normal : FontStyle.Normal,
+            new Typeface(FontFamily.Default, FontStyle.Normal,
                 bold ? FontWeight.SemiBold : FontWeight.Normal), size, brush);
         context.DrawText(formatted, origin);
     }

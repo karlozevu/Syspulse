@@ -46,6 +46,7 @@ public sealed class HardwareViewModel : ViewModelBase
     private string _displayList = string.Empty;
     private string _sensorCount = "0";
     private bool _isMonitoring;
+    private SystemOverview? _overview;
 
     public HardwareViewModel()
     {
@@ -121,6 +122,7 @@ public sealed class HardwareViewModel : ViewModelBase
 
     private void Apply(SystemOverview o)
     {
+        _overview = o;
         CpuName = o.Cpu.Name;
         CpuCores = $"{o.Cpu.PhysicalCores} / {o.Cpu.LogicalProcessors}";
         CpuBase = $"{o.Cpu.BaseClockMHz:F0} MHz";
@@ -149,19 +151,22 @@ public sealed class HardwareViewModel : ViewModelBase
                 $"{L("Hardware_GpuTemp")}: {(g.TemperatureCelsius.HasValue ? $"{g.TemperatureCelsius:F1} °C" : L("Common_NA"))}"));
 
         DiskList = o.Disks.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine + Environment.NewLine,
-            o.Disks.Select(d => $"[{d.MediaTypeText}] 磁盘 {d.DiskIndex} {d.Model}  " +
+            o.Disks.Select(d => $"[{d.MediaTypeText}] {L("Label_Disk")} {d.DiskIndex} {d.Model}  " +
                 $"{FormatHelper.FormatBytes(d.TotalBytes)}  {d.InterfaceType}{Environment.NewLine}" +
                 $"  {L("Hardware_DiskHealth")}: {HealthText(d.Health)} · {d.Smart.Summary}{Environment.NewLine}" +
-                $"  SMART: {(d.Smart.IsAvailable ? $"通电 {d.Smart.PowerOnHours?.ToString() ?? "N/A"} h，循环 {d.Smart.PowerCycleCount?.ToString() ?? "N/A"}" : L("Common_NA"))}{Environment.NewLine}" +
+                $"  SMART: {(d.Smart.IsAvailable ? $"{L("Label_PowerOn")} {d.Smart.PowerOnHours?.ToString() ?? "N/A"} h, {L("Label_Cycles")} {d.Smart.PowerCycleCount?.ToString() ?? "N/A"}" : L("Common_NA"))}{Environment.NewLine}" +
                 string.Join(Environment.NewLine, d.Partitions.Select(p =>
                     $"  {p.DriveLetter} {p.FileSystem}  {FormatHelper.FormatBytes(p.UsedBytes)}/{FormatHelper.FormatBytes(p.TotalBytes)} ({p.UsedPercent:F1} %)"))));
 
         BatteryPresent = o.Battery.IsPresent;
         BatteryDesign = $"{o.Battery.DesignCapacityMwh} mWh";
-        BatteryFull = $"{o.Battery.FullChargeCapacityMwh} mWh";
-        BatteryWear = $"{o.Battery.WearPercent:F1} %";
+        // 读不到满充容量时不能拿设计容量冒充满充容量（否则损耗率恒为 0%），显示未知。
+        BatteryFull = o.Battery.IsFullChargeCapacityKnown
+            ? $"{o.Battery.FullChargeCapacityMwh} mWh" : L("Common_NA");
+        BatteryWear = o.Battery.IsFullChargeCapacityKnown
+            ? $"{o.Battery.WearPercent:F1} %" : L("Common_NA");
         BatteryCycles = o.Battery.CycleCount >= 0 ? o.Battery.CycleCount.ToString() : L("Common_NA");
-        BatteryCharge = $"{o.Battery.ChargePercent:F1} % ({(o.Battery.IsCharging ? "充电中" : "未充电")})";
+        BatteryCharge = $"{o.Battery.ChargePercent:F1} % ({(o.Battery.IsCharging ? L("Label_Charging") : L("Label_NotCharging"))})";
 
         DisplayList = o.Displays.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine,
             o.Displays.Select(d => $"{(d.IsPrimary ? "● " : "○ ")}{d.DeviceName}  {d.ResolutionText}  " +
@@ -203,12 +208,17 @@ public sealed class HardwareViewModel : ViewModelBase
         });
     }
 
+    protected override void OnLanguageChanged()
+    {
+        if (_overview is not null) Apply(_overview);
+    }
+
     private static string HealthText(DiskHealthStatus status) => status switch
     {
-        DiskHealthStatus.Healthy => "健康",
-        DiskHealthStatus.Warning => "⚠ 警告",
-        DiskHealthStatus.Failed => "故障",
-        _ => "未知"
+        DiskHealthStatus.Healthy => L("Label_HealthHealthy"),
+        DiskHealthStatus.Warning => L("Label_HealthWarning"),
+        DiskHealthStatus.Failed => L("Label_HealthFailed"),
+        _ => L("Label_HealthUnknown")
     };
 
     public override void Dispose()

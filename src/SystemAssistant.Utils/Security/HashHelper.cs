@@ -28,7 +28,11 @@ public static class HashHelper
         var length = stream.Length;
         var buffer = new byte[chunkSize];
 
+        // 头部读完后立即计算哈希：buffer 稍后会被尾部读取复用，
+        // 若延后计算会得到与尾部相同的哈希，指纹失去区分度。
         var headRead = await stream.ReadAsync(buffer.AsMemory(0, chunkSize), token);
+        var headPart = Convert.ToHexString(SHA256.HashData(buffer.AsSpan(0, headRead)));
+
         string tailPart;
         if (length > chunkSize * 2)
         {
@@ -41,7 +45,6 @@ public static class HashHelper
             tailPart = "-";
         }
 
-        var headPart = Convert.ToHexString(SHA256.HashData(buffer.AsSpan(0, headRead)));
         return $"{length}:{headPart}:{tailPart}";
     }
 }

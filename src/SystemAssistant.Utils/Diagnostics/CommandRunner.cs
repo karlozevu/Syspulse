@@ -127,13 +127,17 @@ public sealed class CommandRunner
 
         try
         {
-            // chcp 65001 让后续读取统一按 UTF-8 解码；脚本中的路径全部加引号
+            // 临时目录可能位于中文用户目录下（Path.GetTempPath() 含非 ASCII）。
+            // 直接用 Encoding.ASCII 写脚本会把这些路径变成 '?'，导致重定向输出丢失。
+            // 这里用 %~dp0（脚本自身所在目录，运行时展开）引用日志 / 退出码文件，
+            // 脚本内容保持纯 ASCII；同时用 UTF-8 写文件，确保任何 Unicode 字符都不被破坏。
+            // chcp 65001 让后续输出统一按 UTF-8 编码，DrainLog 才能正确解码。
             var scriptContent =
                 "@echo off\r\n" +
                 "chcp 65001 >nul\r\n" +
-                $"({commandLine}) > \"{log}\" 2>&1\r\n" +
-                $"echo %ERRORLEVEL% > \"{code}\"\r\n";
-            File.WriteAllText(script, scriptContent, Encoding.ASCII);
+                $"({commandLine}) > \"%~dp0output.log\" 2>&1\r\n" +
+                "echo %ERRORLEVEL% > \"%~dp0exit.code\"\r\n";
+            File.WriteAllText(script, scriptContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
             var psi = new ProcessStartInfo("cmd.exe", $"/d /c \"{script}\"")
             {
@@ -155,10 +159,16 @@ public sealed class CommandRunner
             {
                 if (token.IsCancellationRequested)
                 {
+                    KillProcessTree(process);
                     return new CommandExecutionResult { ExitCode = -1, StandardError = "用户取消了操作" };
                 }
                 lastPosition = DrainLog(log, lastPosition, output);
-                try { await Task.Delay(250, token); } catch (OperationCanceledException) { break; }
+                try { await Task.Delay(250, token); }
+                catch (OperationCanceledException)
+                {
+                    KillProcessTree(process);
+                    return new CommandExecutionResult { ExitCode = -1, StandardError = "用户取消了操作" };
+                }
             }
             await process.WaitForExitAsync(CancellationToken.None);
             lastPosition = DrainLog(log, lastPosition, output);
@@ -179,8 +189,21 @@ public sealed class CommandRunner
         }
         finally
         {
-            try { Directory.Delete(tempDir, recursive: true); } catch (IOException) { }
+            try { Directory.Delete(tempDir, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
+    }
+
+    /// <summary>取消时结束整个进程树，避免遗留仍在运行的提权子进程。</summary>
+    private static void KillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
+                                      or NotSupportedException) { }
     }
 
     private long DrainLog(string logPath, long position, StringBuilder output)

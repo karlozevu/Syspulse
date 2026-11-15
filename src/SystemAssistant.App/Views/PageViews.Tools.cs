@@ -29,9 +29,9 @@ public static partial class PageViewLocator
                 UiFactory.Muted("Toolbox_ShredHint"),
                 UiFactory.Toolbar(
                     UiFactory.Button("Toolbox_SelectFiles", vm.PickFilesCommand),
-                    UiFactory.Plain(LocalizationService.Instance.Get("Toolbox_Passes") + ":"),
+                    UiFactory.Text("Toolbox_Passes"),
                     passes,
-                    UiFactory.Button("Toolbox_Shred", vm.ShredCommand, accent: true)),
+                    UiFactory.Button("Toolbox_Shred", vm.ShredCommand, variant: ButtonVariant.Danger)),
                 UiFactory.Card(shredFiles)
             }
         };
@@ -61,10 +61,10 @@ public static partial class PageViewLocator
                 UiFactory.Toolbar(
                     UiFactory.Button("Common_Browse", vm.PickRootCommand),
                     rootLarge,
-                    UiFactory.Plain(LocalizationService.Instance.Get("Toolbox_MinSize") + ":"),
+                    UiFactory.Text("Toolbox_MinSize"),
                     minLarge,
                     UiFactory.Button("Toolbox_FindLarge", vm.FindLargeCommand, accent: true),
-                    UiFactory.Button("Toolbox_DeleteSelected", vm.DeleteSelectedCommand, "large")),
+                    UiFactory.Button("Toolbox_DeleteSelected", vm.DeleteSelectedCommand, "large", variant: ButtonVariant.Danger)),
                 largeTable
             }
         };
@@ -94,7 +94,7 @@ public static partial class PageViewLocator
                     UiFactory.Button("Common_Browse", vm.PickRootCommand),
                     rootDuplicate,
                     UiFactory.Button("Toolbox_FindDuplicates", vm.FindDuplicatesCommand, accent: true),
-                    UiFactory.Button("Toolbox_DeleteSelected", vm.DeleteSelectedCommand, "duplicate")),
+                    UiFactory.Button("Toolbox_DeleteSelected", vm.DeleteSelectedCommand, "duplicate", variant: ButtonVariant.Danger)),
                 UiFactory.BoundText(vm, nameof(ToolboxViewModel.WastedText)),
                 duplicateTable
             }
@@ -168,9 +168,9 @@ public static partial class PageViewLocator
                 UiFactory.Button("Common_Browse", vm.BrowseExportCommand))),
             LabeledRow("Settings_BackupPath", UiFactory.Toolbar(backupPath,
                 UiFactory.Button("Common_Browse", vm.BrowseBackupCommand))),
-            UiFactory.Plain(LocalizationService.Instance.Get("Settings_Whitelist"), muted: true),
+            UiFactory.Muted("Settings_Whitelist"),
             whitelist,
-            UiFactory.Plain(LocalizationService.Instance.Get("Settings_CustomPaths"), muted: true),
+            UiFactory.Muted("Settings_CustomPaths"),
             customPaths);
 
         var update = UiFactory.Section("Settings_Update",
@@ -227,7 +227,7 @@ public static partial class PageViewLocator
         var toolbar = UiFactory.Toolbar(
             UiFactory.Button("Common_Refresh", vm.RefreshCommand),
             UiFactory.Button("Logs_Export", vm.ExportCommand),
-            UiFactory.Button("Logs_Clear", vm.ClearCommand));
+            UiFactory.Button("Logs_Clear", vm.ClearCommand, variant: ButtonVariant.Danger));
         var body = new StackPanel { Children = { toolbar, table } };
         return Shell(vm, "Logs_Title", "Logs_Subtitle", body);
     }

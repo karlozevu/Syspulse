@@ -126,7 +126,7 @@ public sealed class OptimizationViewModel : ViewModelBase
     {
         TuningItems = Services.Tuning.GetTuningItems();
         var vm = Services.Tuning.GetVirtualMemoryInfo();
-        VirtualMemory = $"{(vm.IsAutomatic ? "自动管理" : $"{vm.InitialSizeMb} ~ {vm.MaximumSizeMb} MB")} · {vm.Description}";
+        VirtualMemory = $"{(vm.IsAutomatic ? L("Label_AutoManaged") : $"{vm.InitialSizeMb} ~ {vm.MaximumSizeMb} MB")} · {vm.Description}";
     }
 
     private async Task SetStartupEnabledAsync(object? parameter, bool enabled)
@@ -228,6 +228,8 @@ public sealed class OptimizationViewModel : ViewModelBase
 
     private async Task RunSimpleNetworkAsync(string action, Func<Task<CommandExecutionResult>> work)
     {
+        // 不能只依赖界面禁用按钮：命令本身也要拦住非管理员调用。
+        if (!IsAdministrator) { StatusMessage = L("Common_AdminRequired"); return; }
         if (!await ConfirmAsync(action, L("Common_Risk") + ": " + L("Optimize_Subtitle"))) return;
         var result = await work();
         StatusMessage = $"{action} → {result.ExitCode}";
@@ -238,7 +240,7 @@ public sealed class OptimizationViewModel : ViewModelBase
         await RunBusyAsync(async () =>
         {
             var result = await Services.Network.TestLatencyAsync(PingHost);
-            PingResult = $"{result.Host} · {result.AverageLatencyMs} ms · 丢包 {result.PacketLossPercent} %";
+            PingResult = $"{result.Host} · {result.AverageLatencyMs} ms · {L("Label_PacketLoss")} {result.PacketLossPercent} %";
             ConsoleText = result.RawOutput;
         }, L("Optimize_Ping"));
     }

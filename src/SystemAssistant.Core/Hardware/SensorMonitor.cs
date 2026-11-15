@@ -103,9 +103,10 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
 
     private void OpenComputer()
     {
+        Computer? computer = null;
         try
         {
-            var computer = new Computer
+            computer = new Computer
             {
                 IsCpuEnabled = true,
                 IsGpuEnabled = true,
@@ -117,29 +118,43 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
                 IsBatteryEnabled = true
             };
             computer.Open();
-            lock (_sync) _computer = computer;
+            lock (_sync)
+            {
+                // 若上一次实例尚未释放，先释放再替换，避免驱动句柄泄漏
+                ReleaseComputer(_computer);
+                _computer = computer;
+            }
+            computer = null; // 所有权已移交，交给 CloseComputer 统一释放
             LastError = string.Empty;
         }
         catch (Exception ex)
         {
+            // Open() 失败时 computer 尚未登记到 _computer，必须在这里就释放掉，
+            // 否则 Ring0.Open() 已创建的资源会随未引用的实例一起泄漏。
+            ReleaseComputer(computer);
             // 常见于未以管理员权限运行：部分主板 / 风扇传感器不可用
             LastError = "传感器初始化受限：" + ex.Message;
         }
     }
 
+    /// <summary>
+    /// 释放 Computer 资源。LibreHardwareMonitorLib 0.9.4 的 Computer 未实现 IDisposable，
+    /// 其公开的 Close() 才是释放入口（关闭 Ring0 驱动句柄、内核互斥体与全部硬件组），
+    /// 因此这里用 Close() 作为 Dispose 的等价实现。
+    /// </summary>
+    private static void ReleaseComputer(Computer? computer)
+    {
+        if (computer is null) return;
+        try { computer.Close(); }
+        catch (Exception) { /* 释放失败不影响后续重建 */ }
+    }
+
     private void CloseComputer()
     {
-        try
+        lock (_sync)
         {
-            lock (_sync)
-            {
-                _computer?.Close();
-                _computer = null;
-            }
-        }
-        catch (Exception ex)
-        {
-            LastError = ex.Message;
+            ReleaseComputer(_computer);
+            _computer = null;
         }
     }
 
@@ -196,8 +211,32 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
             CpuUsagePercent = cpuUsage,
             MemoryUsagePercent = memoryUsage
         };
-        SnapshotUpdated?.Invoke(snapshot);
+        RaiseSnapshotUpdated(snapshot);
         CheckThresholds(readings, now);
+    }
+
+    /// <summary>逐个订阅者调用快照事件，订阅者异常不会终止采集循环。</summary>
+    private void RaiseSnapshotUpdated(SensorSnapshot snapshot)
+    {
+        var handlers = SnapshotUpdated;
+        if (handlers is null) return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<SensorSnapshot>)handler)(snapshot); }
+            catch (Exception ex) { LastError = "快照订阅者异常：" + ex.Message; }
+        }
+    }
+
+    /// <summary>逐个订阅者调用阈值告警事件，订阅者异常不会终止采集循环。</summary>
+    private void RaiseThresholdExceeded(ThresholdAlert alert)
+    {
+        var handlers = ThresholdExceeded;
+        if (handlers is null) return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<ThresholdAlert>)handler)(alert); }
+            catch (Exception ex) { LastError = "阈值告警订阅者异常：" + ex.Message; }
+        }
     }
 
     private static void AddSensors(List<SensorReading> target, string hardwareType, IEnumerable<ISensor> sensors)
@@ -272,7 +311,7 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
                 var key = threshold.SensorIdentifier + "|" + reading.Identifier;
                 if (_lastAlert.TryGetValue(key, out var last) && now - last < _alertCooldown) continue;
                 _lastAlert[key] = now;
-                ThresholdExceeded?.Invoke(new ThresholdAlert { Reading = reading, Threshold = threshold.MaxValue, RaisedAt = now });
+                RaiseThresholdExceeded(new ThresholdAlert { Reading = reading, Threshold = threshold.MaxValue, RaisedAt = now });
             }
         }
     }

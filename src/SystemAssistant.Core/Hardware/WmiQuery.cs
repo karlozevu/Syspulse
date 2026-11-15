@@ -61,8 +61,11 @@ internal static class WmiQuery
                 using (mo)
                 {
                     try { action(mo); }
-                    catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException
-                                                  or System.Runtime.InteropServices.COMException) { }
+                    catch (Exception)
+                    {
+                        // 回调里的转换 / 格式化异常（例如 BuildDisks 的 Convert.ToInt32）
+                        // 必须就地消化，否则会让整个硬件查询任务 faulted。
+                    }
                 }
             }
         }

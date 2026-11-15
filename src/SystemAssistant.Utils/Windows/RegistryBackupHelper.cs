@@ -59,7 +59,7 @@ public static class RegistryBackupHelper
             var output = Path.Combine(directory, fileName);
             var result = await CommandRunner.RunQuickAsync("reg.exe", $"export \"{key}\" \"{output}\" /y", token);
             if (result.Succeeded && File.Exists(output)) files.Add(output);
-            else errors.Add($"{key}：{result.StandardError.Trim()}");
+            else errors.Add($"{key}：{(string.IsNullOrWhiteSpace(result.StandardError) ? "reg.exe 导出失败或未生成文件" : result.StandardError.Trim())}");
         }
 
         var manifest = Path.Combine(directory, "RESTORE_README.txt");
@@ -81,8 +81,9 @@ public static class RegistryBackupHelper
 
         return new RegistryBackupResult
         {
-            // 部分键不存在属于正常情况；只要有键成功导出且错误数少于总数即视为可用
-            Success = files.Count > 0,
+            // 只要有一个键导出失败就不能视为备份成功：注册表删除的前置条件必须是完整备份。
+            // 失败键明细通过 Errors 一并返回给调用方展示。
+            Success = files.Count > 0 && errors.Count == 0,
             Directory = directory,
             ManifestPath = manifest,
             Files = files,

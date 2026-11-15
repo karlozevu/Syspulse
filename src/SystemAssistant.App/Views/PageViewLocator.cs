@@ -35,23 +35,24 @@ public static partial class PageViewLocator
         if (subtitleKey is not null) header.Children.Add(UiFactory.Muted(subtitleKey));
 
         var status = UiFactory.BoundText(vm, nameof(ViewModelBase.StatusMessage), muted: true);
-        var busy = new ProgressBar { Height = 3, IsIndeterminate = true, Margin = new Thickness(0, 4, 0, 0) };
+        // 贴顶的细忙碌条，页面之间共用同一套头尾节奏；不再各自嵌套滚动容器。
+        var busy = new ProgressBar { Height = 2, IsIndeterminate = true };
         busy.Bind(Visual.IsVisibleProperty, new Binding(nameof(ViewModelBase.IsBusy)) { Source = vm });
 
-        var footer = new StackPanel { Margin = new Thickness(24, 8, 24, 14), Spacing = 2 };
-        footer.Children.Add(busy);
+        var footer = new StackPanel { Margin = new Thickness(24, 8, 24, 16) };
         footer.Children.Add(status);
 
         var root = new DockPanel();
+        DockPanel.SetDock(busy, Dock.Top);
         DockPanel.SetDock(header, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
+        root.Children.Add(busy);
         root.Children.Add(header);
         root.Children.Add(footer);
-        root.Children.Add(new ScrollViewer
+        root.Children.Add(new StackPanel
         {
-            Content = new StackPanel { Margin = new Thickness(24, 4, 24, 8), Children = { body } },
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+            Margin = new Thickness(24, 8, 24, 8),
+            Children = { body }
         });
         // 页面根的数据上下文是当前页面 ViewModel（会覆盖主窗口的 DataContext）
         root.DataContext = vm;

@@ -69,5 +69,13 @@ public sealed class OperationLogService : IOperationLogService
         Changed?.Invoke();
     }
 
-    private static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
+    private static string Csv(string value)
+    {
+        // 防止 CSV 公式注入：Excel / WPS 会把以 = + - @ 开头的单元格当成公式执行。
+        // 前置单引号强制按文本处理（前面的空白字符也要跳过再判断）。
+        var significant = value.TrimStart(' ', '\t', '\r', '\n');
+        if (significant.Length > 0 && significant[0] is '=' or '+' or '-' or '@')
+            value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
 }

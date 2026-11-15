@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Text;
+
 namespace SystemAssistant.Utils.IO;
 
 /// <summary>
@@ -6,6 +9,9 @@ namespace SystemAssistant.Utils.IO;
 /// </summary>
 public static class PathGuard
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetLongPathNameW")]
+    private static extern uint GetLongPathName(string shortPath, StringBuilder longPath, uint bufferSize);
+
     private static readonly HashSet<string> CriticalFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "bootmgr", "bootmgr.efi", "ntldr", "ntdetect.com", "pagefile.sys",
@@ -24,17 +30,33 @@ public static class PathGuard
             return false;
         }
 
-        // 注册表项由专门的注册表清理逻辑处理，不走文件删除接口
-        if (path.StartsWith("HK", StringComparison.OrdinalIgnoreCase) && path.Contains('\\'))
+        var trimmed = path.Trim().Trim('"');
+
+        // 注册表项由专门的注册表清理逻辑处理，不走文件删除接口；前缀必须精确匹配，
+        // 避免把普通文件误判，也避免 HKLM/HKCU/HKEY_ 之外的伪前缀绕过。
+        if (trimmed.StartsWith(@"HKLM\", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith(@"HKCU\", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("HKEY_", StringComparison.OrdinalIgnoreCase))
         {
             reason = "注册表项不能使用文件删除接口";
+            return false;
+        }
+
+        // 显式拒绝设备路径与 UNC 路径：\\?\、\\.\、\\server\share 都可能绕过
+        // 后面的字符串比较（GetFullPath 对它们的处理与本地路径不同）。
+        var slashNormalized = trimmed.Replace('/', '\\');
+        if (slashNormalized.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            reason = "禁止使用 \\\\?\\ / \\\\.\\ 设备路径或 UNC 路径删除";
             return false;
         }
 
         string full;
         try
         {
-            full = Path.GetFullPath(path.Trim().Trim('"'));
+            full = Path.GetFullPath(trimmed);
+            // 展开 8.3 短名后再做白名单 / 受保护目录比较，防止用 PROGRA~1 之类绕过。
+            full = ExpandLongPath(full);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -96,6 +118,66 @@ public static class PathGuard
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 逐段检查路径（含目标本身）是否带有 <see cref="FileAttributes.ReparsePoint"/>。
+    /// 符号链接 / junction 会让删除、粉碎操作作用到真实目标之外，调用方命中时必须跳过。
+    /// 无法读取某一段属性时继续检查其余段，避免误伤正常的系统临时目录清理。
+    /// </summary>
+    public static bool HasReparsePointInPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            var full = Path.GetFullPath(path.Trim().Trim('"'));
+            var root = Path.GetPathRoot(full);
+            if (string.IsNullOrEmpty(root)) return true;
+
+            var segments = full[root.Length..].Split(
+                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            var current = root;
+            foreach (var segment in segments)
+            {
+                current = Path.Combine(current, segment);
+                try
+                {
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                              or ArgumentException or NotSupportedException)
+                {
+                    // 该段不存在或无权限读取：不据此判定为安全，也不中断整条路径检查
+                }
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return true; // 路径无法解析时保守拒绝
+        }
+    }
+
+    /// <summary>用 Win32 GetLongPathName 把 8.3 短名展开为长名；失败时原样返回。</summary>
+    private static string ExpandLongPath(string fullPath)
+    {
+        try
+        {
+            for (var capacity = 512; capacity <= 32768; capacity *= 2)
+            {
+                var buffer = new StringBuilder(capacity);
+                var length = GetLongPathName(fullPath, buffer, (uint)buffer.Capacity);
+                if (length == 0) return fullPath;
+                if (length < buffer.Capacity) return buffer.ToString();
+            }
+            return fullPath;
+        }
+        catch (Exception)
+        {
+            return fullPath;
+        }
     }
 
     /// <summary>相对路径 / 路径穿越检测。</summary>

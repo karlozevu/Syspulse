@@ -93,20 +93,20 @@ public sealed class OverviewViewModel : ViewModelBase
         BiosDate = o.Bios.ReleaseDate;
         GeneratedAt = o.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss");
 
-        CpuSummary = $"{o.Cpu.Name} · {o.Cpu.PhysicalCores} 核 / {o.Cpu.LogicalProcessors} 线程 · {o.Cpu.BaseClockMHz:F0} MHz";
-        MemorySummary = $"{FormatHelper.FormatBytes(o.Memory.TotalBytes)} · 已用 {FormatHelper.FormatBytes(o.Memory.UsedBytes)} ({o.Memory.UsagePercent:F1} %)";
+        CpuSummary = $"{o.Cpu.Name} · {o.Cpu.PhysicalCores} {L("Label_Cores")} / {o.Cpu.LogicalProcessors} {L("Label_Threads")} · {o.Cpu.BaseClockMHz:F0} MHz";
+        MemorySummary = $"{FormatHelper.FormatBytes(o.Memory.TotalBytes)} · {L("Label_Used")} {FormatHelper.FormatBytes(o.Memory.UsedBytes)} ({o.Memory.UsagePercent:F1} %)";
         GpuSummary = o.Gpus.Count == 0
             ? L("Common_None")
             : string.Join("；", o.Gpus.Select(g => $"{g.Name}（{FormatHelper.FormatBytes(g.VramTotalBytes)}）"));
         DiskSummary = o.Disks.Count == 0
             ? L("Common_None")
             : string.Join("；", o.Disks.Select(d =>
-                $"磁盘 {d.DiskIndex} {d.Model} {FormatHelper.FormatBytes(d.TotalBytes)} [{d.MediaTypeText} / {HealthText(d.Health)}]"));
+                $"{L("Label_Disk")} {d.DiskIndex} {d.Model} {FormatHelper.FormatBytes(d.TotalBytes)} [{d.MediaTypeText} / {HealthText(d.Health)}]"));
         NetworkSummary = o.NetworkAdapters.Count == 0
             ? L("Common_None")
             : string.Join("；", o.NetworkAdapters.Select(n => $"{n.Name} {n.IpAddresses}"));
         BatterySummary = o.Battery.IsPresent
-            ? $"{o.Battery.FullChargeCapacityMwh} / {o.Battery.DesignCapacityMwh} mWh · 损耗 {o.Battery.WearPercent:F1} % · 电量 {o.Battery.ChargePercent:F1} %"
+            ? $"{o.Battery.FullChargeCapacityMwh} / {o.Battery.DesignCapacityMwh} mWh · {L("Label_Wear")} {o.Battery.WearPercent:F1} % · {L("Label_Charge")} {o.Battery.ChargePercent:F1} %"
             : L("Hardware_BatteryNone");
         DisplaySummary = o.Displays.Count == 0
             ? L("Common_None")
@@ -127,11 +127,17 @@ public sealed class OverviewViewModel : ViewModelBase
         await DialogService.MessageAsync(L("Common_Export"), path);
     }
 
+    // 组合文本是缓存字符串，语言切换时必须用同一份数据重新生成。
+    protected override void OnLanguageChanged()
+    {
+        if (_overview is not null) Apply(_overview);
+    }
+
     private static string HealthText(DiskHealthStatus status) => status switch
     {
-        DiskHealthStatus.Healthy => "健康",
-        DiskHealthStatus.Warning => "⚠ 警告",
-        DiskHealthStatus.Failed => "故障",
-        _ => "未知"
+        DiskHealthStatus.Healthy => L("Label_HealthHealthy"),
+        DiskHealthStatus.Warning => L("Label_HealthWarning"),
+        DiskHealthStatus.Failed => L("Label_HealthFailed"),
+        _ => L("Label_HealthUnknown")
     };
 }

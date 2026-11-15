@@ -41,10 +41,16 @@ public sealed class NetworkToolService : INetworkToolService
     public async Task<NetworkLatencyResult> TestLatencyAsync(string host, CancellationToken token = default)
     {
         var target = string.IsNullOrWhiteSpace(host) ? "www.baidu.com" : host.Trim();
-        // 防止命令注入：只允许域名 / IP 中合法字符
-        if (!Regex.IsMatch(target, @"^[A-Za-z0-9.\-:]+$"))
+        // 防止命令注入：只允许域名 / IP 中合法字符；拒绝以 '-' 开头（会被 ping 当成开关），
+        // 并限制长度不超过 DNS 允许的 253 字符。
+        if (target.Length > 253 || target[0] == '-'
+            || !Regex.IsMatch(target, @"^[A-Za-z0-9.\-:]+$"))
         {
-            return new NetworkLatencyResult { Host = target, RawOutput = "目标主机包含非法字符" };
+            return new NetworkLatencyResult
+            {
+                Host = target,
+                RawOutput = "目标主机不合法：长度超限、以 - 开头或包含非法字符"
+            };
         }
 
         var runner = new CommandRunner();

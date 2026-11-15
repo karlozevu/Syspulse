@@ -130,8 +130,8 @@ public sealed class CleanerViewModel : ViewModelBase
         var totalSize = selected.Sum(i => i.SizeBytes);
         var highRisk = selected.Count(i => i.Risk > RiskLevel.Low);
         var detail = string.Join(Environment.NewLine, selected.Take(40).Select(i =>
-            $"  [{(i.Risk == RiskLevel.High ? "高" : i.Risk == RiskLevel.Medium ? "中" : "低")}] {i.Path}"))
-            + (selected.Length > 40 ? Environment.NewLine + $"  ... 其余 {selected.Length - 40} 项" : string.Empty);
+            $"  [{(i.Risk == RiskLevel.High ? L("Risk_High") : i.Risk == RiskLevel.Medium ? L("Risk_Medium") : L("Risk_Low"))}] {i.Path}"))
+            + (selected.Length > 40 ? Environment.NewLine + $"  ... {L("Label_Remaining")} {selected.Length - 40} {L("Common_ItemsUnit")}" : string.Empty);
 
         var first = await DialogService.ConfirmAsync(L("Cleaner_ConfirmTitle"),
             LF("Cleaner_ConfirmBody", selected.Length, FormatHelper.FormatBytes(totalSize)), detail);

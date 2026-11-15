@@ -13,12 +13,14 @@ public sealed class ConsoleWindow : Window
     private readonly TextBox _output;
     private int _lineCount;
 
-    public ConsoleWindow(string title)
+    /// <param name="titleKey">本地化资源键（窗口标题随语言即时切换）。</param>
+    public ConsoleWindow(string titleKey)
     {
-        Title = title;
+        AppIcon.Apply(this);
         Width = 820;
         Height = 480;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Localize.SetKey(this, titleKey);
 
         _output = new TextBox
         {
@@ -35,17 +37,22 @@ public sealed class ConsoleWindow : Window
 
         var close = new Button
         {
-            Content = LocalizationService.Instance.Get("Common_Close"),
             HorizontalAlignment = HorizontalAlignment.Right,
             Padding = new Thickness(14, 6),
-            Margin = new Thickness(0, 8, 0, 0)
+            Margin = new Thickness(0, 8, 0, 0),
+            Classes = { "subtle" }
         };
+        Localize.SetKey(close, "Common_Close");
         close.Click += (_, _) => Close();
 
         var root = new DockPanel { Margin = new Thickness(12) };
         DockPanel.SetDock(close, Dock.Bottom);
         root.Children.Add(close);
-        root.Children.Add(new ScrollViewer { Content = _output, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto });
+        root.Children.Add(new ScrollViewer
+        {
+            Content = _output,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
+        });
         Content = root;
     }
 

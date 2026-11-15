@@ -20,7 +20,13 @@ public sealed class Localize
         KeyProperty.Changed.AddClassHandler<AvaloniaObject>((target, e) =>
         {
             if (e.NewValue is not string key || string.IsNullOrEmpty(key)) return;
-            lock (Sync) Registered.Add((new WeakReference<AvaloniaObject>(target), key));
+            lock (Sync)
+            {
+                // 同一控件换 key（例如「开始 / 停止采集」）时替换旧注册，避免重复刷新与陈旧文案。
+                Registered.RemoveAll(entry => entry.Target.TryGetTarget(out var existing)
+                                              && ReferenceEquals(existing, target));
+                Registered.Add((new WeakReference<AvaloniaObject>(target), key));
+            }
             Apply(target, key);
         });
         LocalizationService.Instance.LanguageChanged += (_, _) => RefreshAll();
@@ -57,6 +63,10 @@ public sealed class Localize
                 break;
             case TextBox textBox:
                 textBox.Watermark = text;
+                break;
+            // Window 继承自 ContentControl，必须放在它前面；窗口标题栏同样要即时切换语言。
+            case Window window:
+                window.Title = text;
                 break;
             case ContentControl content when content.Content is null or string:
                 content.Content = text;

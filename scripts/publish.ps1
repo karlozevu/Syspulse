@@ -86,7 +86,31 @@ Set-Content -Path $readme -Value $lines -Encoding UTF8
 $zip = Join-Path (Split-Path -Parent $Output) "$(Split-Path -Leaf $Output).zip"
 $filesToZip = @(Get-ChildItem -Path $Output -Filter "*.exe" | ForEach-Object { $_.FullName }) + @($readme)
 if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path $filesToZip -DestinationPath $zip -CompressionLevel Optimal
+# Windows PowerShell 5.1 Compress-Archive may silently omit a large (>40 MB)
+# single-file bundle, producing an archive with only the readme. Use the .NET
+# ZipFile API instead and verify that the exe really made it into the archive.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+try {
+    foreach ($entryPath in $filesToZip) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive,
+            $entryPath,
+            [System.IO.Path]::GetFileName($entryPath),
+            'Optimal') | Out-Null
+    }
+} finally {
+    $archive.Dispose()
+}
+$verify = [System.IO.Compression.ZipFile]::OpenRead($zip)
+try {
+    if (-not ($verify.Entries | Where-Object { $_.Name -like '*.exe' })) {
+        throw "Archive verification failed: $zip does not contain the executable"
+    }
+} finally {
+    $verify.Dispose()
+}
 
 Write-Host ""
 Write-Host "Publish succeeded." -ForegroundColor Green

@@ -4,6 +4,8 @@ Windows 10 / 11 上的本机硬件监控、安全清理与系统维护工具。�
 
 > 本项目**不联网上传任何硬件信息、扫描结果或文件列表**；不捆绑任何第三方软件、广告；不会静默修改系统设置。
 
+> 复检报告（缺陷清单、修复对照、已知遗留）：[REVIEW.md](REVIEW.md) · 变更记录：[CHANGELOG.md](CHANGELOG.md) · 安装包构建见第 8 节。
+
 ---
 
 ## 1. 项目结构
@@ -205,3 +207,79 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 - [ ] 后台采集期间界面滚动 / 切换流畅
 - [ ] 主题与中英文切换即时生效
 - [ ] 发布脚本产出可直接双击运行的单文件 exe
+
+---
+
+## 8. Windows 安装程序（Inno Setup 6）
+
+成品：`artifacts/SystemAssistant-Setup-1.0.0.exe`（43,919,952 字节，约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
+
+### 8.1 运行要求与安装位置
+
+| 项目 | 说明 |
+| --- | --- |
+| 系统 | Windows 10 / 11（64 位，`x64compatible`） |
+| 权限 | `PrivilegesRequired=lowest`，**不需要管理员权限、不会弹 UAC** |
+| 默认目录 | `%LOCALAPPDATA%\Programs\System Assistant`（Inno Setup 常量 `{userpf}`） |
+| 卸载注册表 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\System Assistant` |
+| 用户数据 | `%LOCALAPPDATA%\SystemAssistant`（配置 / 日志），**安装与卸载都不删除** |
+
+### 8.2 向导流程（默认简体中文，可切换 English）
+
+选择安装语言 → 欢迎 → 选择目标位置 → 选择附加任务（可选「创建桌面快捷方式」，默认不勾选）→ 准备安装 → 安装进度 → 完成（可选「运行 System Assistant」）。
+
+安装后会创建开始菜单文件夹 `System Assistant`，内含主程序快捷方式与「卸载 System Assistant」快捷方式；桌面快捷方式仅在勾选附加任务时创建。
+
+卸载信息由脚本的 `[Registry]` 写入 HKCU 的 `...\Uninstall\System Assistant`，包含 `DisplayName`、`DisplayVersion`、`Publisher`、`InstallLocation`、`DisplayIcon`、`UninstallString`（另有 `QuietUninstallString`、`URLInfoAbout`、`NoModify`、`NoRepair`）。卸载器 `unins000.exe` 随程序安装，可从开始菜单快捷方式或「应用和功能」启动，会删除安装文件、快捷方式与该注册表项；**不会触碰用户数据目录**，交互式卸载时还会弹窗说明数据将被保留。
+
+> 脚本刻意设置 `CreateUninstallRegKey=no` 并自行写注册表，以便卸载项名称严格等于 `System Assistant`（而不是 Inno Setup 默认的 `...\System Assistant_is1`）；卸载器仍会正常生成，且该键带 `uninsdeletekey`，卸载时自动清理。脚本中没有任何 `[InstallDelete]` / `[UninstallDelete]` 段，用户数据目录从未列入删除范围。
+
+### 8.3 静默安装 / 卸载
+
+```bat
+:: 完全静默安装（无界面）
+SystemAssistant-Setup-1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+  /DIR="%LOCALAPPDATA%\Programs\System Assistant" /LOG="%TEMP%\sa-install.log"
+
+:: 其他常用参数
+:: /SILENT                    隐藏向导页但保留进度条
+:: /LANG=english              使用英文界面
+:: /TASKS="desktopicon"       额外创建桌面快捷方式
+:: /NOCANCEL /CLOSEAPPLICATIONS
+
+:: 静默卸载
+"%LOCALAPPDATA%\Programs\System Assistant\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+静默安装不会自动启动程序（`[Run]` 带 `skipifsilent`），适合无人值守 / CI 部署。
+
+### 8.4 从源码重建安装包
+
+```bat
+cd /d <仓库根目录>\SystemAssistant
+scripts\build-installer.cmd
+```
+
+构建脚本会自动定位编译器，优先使用工作区内的便携副本 `.tools\inno\ISCC.exe`（Inno Setup 6.7.3，未安装到系统），找不到时回退到本机已安装的 Inno Setup 6。相关源码：
+
+- `installer\SystemAssistant-Setup.iss` —— 安装 / 卸载 / 注册表 / 快捷方式主脚本
+- `installer\ChineseSimplified.isl` —— 简体中文语言文件（Inno Setup 6.5.0+ 官方中文翻译，UTF-8 无 BOM）
+- `scripts\build-installer.cmd` —— 一键构建与产物校验
+
+重建前需先通过 `scripts\publish.ps1` 产出 `artifacts/win-x64-self-contained/SystemAssistant.exe`。
+
+---
+
+## 9. 应用图标
+
+采用与界面强调色一致的品牌蓝圆角方块，配一条白色上升监控曲线、半透明面积填充、基线与端点光环；单一粗笔画保证 16×16 下仍能辨识。
+
+| 文件 | 用途 |
+| --- | --- |
+| `scripts/make_icon.py` | 图标生成器，仅用 Python 标准库，可复现、无需设计软件 |
+| `installer/app-icon.svg` | 可编辑的矢量设计稿 |
+| `src/SystemAssistant.App/Assets/app.ico` | 9 种尺寸（16–256）的 ICO，用于 Win32 exe 与安装包 |
+| `src/SystemAssistant.App/Assets/app-icon.png` | 256×256 PNG，用于 Avalonia 窗口标题栏 / 任务栏 |
+| `installer/app.ico` | ICO 副本，供 Inno Setup 的 `SetupIconFile` 使用 |
+
+重新生成只需执行 `python scripts/make_icon.py`。图标通过三处接入：`.csproj` 的 `ApplicationIcon`（exe）、`Services/AppIcon.cs` 与各窗口的 `Icon` 属性（Avalonia 窗口与对话框）、Inno Setup 的 `SetupIconFile`（安装包向导与 setup.exe）。改动图标后需依次重新 build、发布便携版、构建安装包。

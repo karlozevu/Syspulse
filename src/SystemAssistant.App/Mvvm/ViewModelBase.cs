@@ -3,16 +3,23 @@ using SystemAssistant.Core.Common;
 
 namespace SystemAssistant.App.Mvvm;
 
-/// <summary>所有 ViewModel 的基类：忙碌状态、状态栏文案、多语言联动。</summary>
+/// <summary>
+/// 所有 ViewModel 的基类：忙碌状态、状态栏文案、多语言联动、命令可用性联动、生命周期取消令牌。
+/// </summary>
 public abstract class ViewModelBase : ObservableObject, IDisposable
 {
     private bool _isBusy;
     private string _statusMessage = string.Empty;
     private bool _disposed;
+    private readonly List<AsyncRelayCommand> _commands = new();
+    private readonly CancellationTokenSource _lifetime = new();
 
     protected ViewModelBase()
     {
         LocalizationService.Instance.LanguageChanged += OnLanguageChangedHandler;
+        // 任何属性变化都刷新所有异步命令的 CanExecute。
+        // 修复：扫描完成 / 选中文件后，依赖 HasResult、ShredFiles.Count 的按钮曾一直保持禁用。
+        PropertyChanged += (_, _) => RaiseCommandsCanExecute();
     }
 
     protected static ServiceHub Services => ServiceHub.Instance;
@@ -25,12 +32,35 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
     /// <summary>取带参数的本地化文本。</summary>
     protected static string LF(string key, params object[] args) => LocalizationService.Instance.Format(key, args);
 
+    /// <summary>窗口 / ViewModel 关闭时取消，供长时间任务检查。</summary>
+    protected CancellationToken LifetimeToken => _lifetime.Token;
+
+    /// <summary>手动通知所有命令重新计算可用性。</summary>
+    protected void RaiseCommandsCanExecute()
+    {
+        foreach (var command in _commands.ToArray()) command.RaiseCanExecuteChanged();
+    }
+
     /// <summary>把异步命令的异常写入状态栏，由基类统一构造命令时调用。</summary>
     protected AsyncRelayCommand CreateCommand(Func<Task> execute, Func<bool>? canExecute = null)
-        => new(execute, canExecute) { ErrorHandler = ex => StatusMessage = "错误：" + ex.Message };
+    {
+        var command = new AsyncRelayCommand(execute, canExecute)
+        {
+            ErrorHandler = ex => StatusMessage = L("Message_ErrorPrefix") + ex.Message
+        };
+        _commands.Add(command);
+        return command;
+    }
 
     protected AsyncRelayCommand CreateCommand(Func<object?, Task> execute, Func<object?, bool>? canExecute = null)
-        => new(execute, canExecute) { ErrorHandler = ex => StatusMessage = "错误：" + ex.Message };
+    {
+        var command = new AsyncRelayCommand(execute, canExecute)
+        {
+            ErrorHandler = ex => StatusMessage = L("Message_ErrorPrefix") + ex.Message
+        };
+        _commands.Add(command);
+        return command;
+    }
 
     public bool IsBusy
     {
@@ -51,7 +81,7 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
         IsBusy = true;
         try { await work(); }
         catch (OperationCanceledException) { StatusMessage = L("Status_Cancelled"); }
-        catch (Exception ex) { StatusMessage = "错误：" + ex.Message; }
+        catch (Exception ex) { StatusMessage = L("Message_ErrorPrefix") + ex.Message; }
         finally { IsBusy = false; }
     }
 
@@ -69,5 +99,8 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
         LocalizationService.Instance.LanguageChanged -= OnLanguageChangedHandler;
+        try { _lifetime.Cancel(); } catch (ObjectDisposedException) { }
+        _lifetime.Dispose();
+        _commands.Clear();
     }
 }

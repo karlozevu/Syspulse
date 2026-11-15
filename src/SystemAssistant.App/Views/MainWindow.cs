@@ -8,39 +8,46 @@ using SystemAssistant.App.Mvvm;
 using SystemAssistant.App.Services;
 using SystemAssistant.App.ViewModels;
 using SystemAssistant.Core.Common;
+using SystemAssistant.Models.Config;
 
 namespace SystemAssistant.App.Views;
 
 /// <summary>
 /// 主窗口：左侧导航 + 顶部工具栏（主题 / 语言 / 权限 / 仪表盘）+ 内容区 + 状态栏。
-/// 内容区根据当前 ViewModel 由 <see cref="PageViewLocator"/> 生成对应页面，页面之间互不耦合。
+/// 页面 View 按 ViewModel 缓存，避免每次导航都重建视图、重复订阅事件造成泄漏。
 /// </summary>
 public sealed class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel = new();
     private readonly ContentControl _contentHost = new();
     private readonly List<(NavigationItem Item, Button Button)> _navButtons = new();
-    private static readonly IBrush SelectedBrush = new SolidColorBrush(Color.FromArgb(45, 0, 120, 215));
+    private readonly Dictionary<ViewModelBase, Control> _viewCache = new();
+    private ComboBox? _themeCombo;
+    private ComboBox? _languageCombo;
+    private Action<ThemeMode>? _themeHandler;
+    private EventHandler? _languageHandler;
 
     public MainWindow()
     {
-        Title = "System Assistant";
+        AppIcon.Apply(this);
         Width = 1280;
         Height = 820;
         MinWidth = 1060;
         MinHeight = 660;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         DataContext = _viewModel;
+        Localize.SetKey(this, "App_Title");
 
         var sidebar = BuildSidebar();
         var toolbar = BuildToolbar();
         var statusBar = BuildStatusBar();
 
-        var mainArea = new DockPanel { Margin = new Thickness(0) };
+        var mainArea = new DockPanel();
         DockPanel.SetDock(toolbar, Dock.Top);
         DockPanel.SetDock(statusBar, Dock.Bottom);
         mainArea.Children.Add(toolbar);
         mainArea.Children.Add(statusBar);
+        // 全窗口只保留这一层垂直滚动；页面内部不再各自嵌套 ScrollViewer。
         mainArea.Children.Add(new ScrollViewer
         {
             Content = _contentHost,
@@ -48,7 +55,8 @@ public sealed class MainWindow : Window
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
         });
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("240,*") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("240,*"),
+            Background = ThemeService.Brush("SaSidebarBrush") };
         Grid.SetColumn(sidebar, 0);
         Grid.SetColumn(mainArea, 1);
         grid.Children.Add(sidebar);
@@ -66,21 +74,29 @@ public sealed class MainWindow : Window
 
     private Control BuildSidebar()
     {
-        var panel = new StackPanel { Margin = new Thickness(12, 18), Spacing = 4 };
-        panel.Children.Add(new TextBlock
+        var panel = new StackPanel { Margin = new Thickness(12, 18), Spacing = 3 };
+
+        var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10,
+            Margin = new Thickness(6, 0, 0, 18) };
+        brand.Children.Add(new Border
         {
-            Text = "System Assistant",
-            FontSize = 17,
-            FontWeight = FontWeight.SemiBold,
-            Margin = new Thickness(8, 0, 0, 4)
+            Width = 34, Height = 34, CornerRadius = new CornerRadius(9),
+            Background = ThemeService.Brush("SaAccentBrush"),
+            Child = new TextBlock
+            {
+                Text = "SA", Foreground = Brushes.White, FontSize = 13,
+                FontWeight = FontWeight.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
         });
-        panel.Children.Add(new TextBlock
-        {
-            Text = "v" + ServiceHub.Instance.Update.CurrentVersion,
-            FontSize = 11,
-            Opacity = 0.6,
-            Margin = new Thickness(8, 0, 0, 16)
-        });
+        var brandText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+        brandText.Children.Add(new TextBlock { Text = "System Assistant", FontSize = 14,
+            FontWeight = FontWeight.SemiBold });
+        brandText.Children.Add(new TextBlock { Text = "v" + ServiceHub.Instance.Update.CurrentVersion,
+            FontSize = 11, Classes = { "caption" } });
+        brand.Children.Add(brandText);
+        panel.Children.Add(brand);
 
         string? lastGroup = null;
         foreach (var item in _viewModel.NavigationItems)
@@ -90,9 +106,8 @@ public sealed class MainWindow : Window
                 lastGroup = item.Group;
                 var groupHeader = new TextBlock
                 {
-                    FontSize = 11,
-                    Opacity = 0.55,
-                    Margin = new Thickness(8, 12, 0, 4)
+                    Classes = { "caption" },
+                    Margin = new Thickness(10, 14, 0, 5)
                 };
                 Localize.SetKey(groupHeader, item.Group);
                 panel.Children.Add(groupHeader);
@@ -100,12 +115,13 @@ public sealed class MainWindow : Window
 
             var label = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
             Localize.SetKey(label, item.LabelKey);
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
             row.Children.Add(new TextBlock
             {
                 Text = item.Icon,
                 FontSize = 15,
                 Width = 20,
+                Foreground = ThemeService.Brush("SaAccentBrush"),
                 TextAlignment = TextAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             });
@@ -113,110 +129,174 @@ public sealed class MainWindow : Window
 
             var button = new Button
             {
+                Classes = { "nav" },
                 Content = row,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(10, 9),
                 Command = _viewModel.NavigateCommand,
                 CommandParameter = item
             };
+            UiFactory.AttachTooltip(button, item.LabelKey);
             _navButtons.Add((item, button));
             panel.Children.Add(button);
         }
 
         var hint = new TextBlock
         {
-            Text = "本工具不会联网上传硬件信息、扫描结果或文件列表",
-            FontSize = 10,
-            Opacity = 0.5,
+            Classes = { "caption" },
             TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(8, 28, 8, 0)
+            Margin = new Thickness(10, 30, 10, 0)
         };
+        Localize.SetKey(hint, "App_PrivacyHint");
         panel.Children.Add(hint);
 
         return new Border
         {
             Child = panel,
+            Background = ThemeService.Brush("SaSidebarBrush"),
             BorderThickness = new Thickness(0, 0, 1, 0),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128))
+            BorderBrush = ThemeService.Brush("SaDividerBrush")
         };
     }
 
     private Control BuildToolbar()
     {
-        var title = new TextBlock { FontSize = 18, FontWeight = FontWeight.SemiBold,
+        var title = new TextBlock { FontSize = 17, FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center };
         Localize.SetKey(title, "App_Title");
+        var accentMark = new Border
+        {
+            Width = 4, Height = 20, CornerRadius = new CornerRadius(2),
+            Background = ThemeService.Brush("SaAccentBrush"),
+            Margin = new Thickness(0, 0, 10, 0)
+        };
+        var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
+        titleRow.Children.Add(accentMark);
+        titleRow.Children.Add(title);
 
-        var themeCombo = UiFactory.LocalizedCombo(
+        _themeCombo = UiFactory.LocalizedCombo(
             new[] { "Theme_System", "Theme_Light", "Theme_Dark" },
             _viewModel.ThemeIndex, index => _viewModel.ThemeIndex = index);
-        var languageCombo = UiFactory.LocalizedCombo(
+        _languageCombo = UiFactory.LocalizedCombo(
             new[] { "Lang_ZhCn", "Lang_EnUs" },
             _viewModel.LanguageIndex, index => _viewModel.LanguageIndex = index);
+        UiFactory.AttachTooltip(_themeCombo, "Theme_System");
+        UiFactory.AttachTooltip(_languageCombo, "Lang_ZhCn");
+
+        // 设置页 / 其它入口修改主题与语言时，顶部下拉框同步，且不会形成回环
+        // （setter 中 Set 遇到相同值会直接返回 false）。
+        _themeHandler = mode =>
+        {
+            if (_themeCombo is not null) _themeCombo.SelectedIndex = (int)mode;
+        };
+        _languageHandler = (_, _) =>
+        {
+            if (_languageCombo is not null)
+                _languageCombo.SelectedIndex = (int)LocalizationService.Instance.Language;
+        };
+        ThemeService.ThemeChanged += _themeHandler;
+        LocalizationService.Instance.LanguageChanged += _languageHandler;
 
         var adminButton = new Button
         {
-            Content = LocalizationService.Instance.Get(_viewModel.IsAdministrator
-                ? "Common_AdminOk" : "Common_Elevate"),
             Command = _viewModel.ElevateCommand,
             IsEnabled = !_viewModel.IsAdministrator,
-            Padding = new Thickness(10, 6),
-            FontSize = 12
+            Classes = { "subtle" }
         };
-        var dashboardButton = UiFactory.Button("Process_Dashboard", _viewModel.OpenDashboardCommand);
+        Localize.SetKey(adminButton, _viewModel.IsAdministrator ? "Common_AdminOk" : "Common_Elevate");
+        UiFactory.AttachTooltip(adminButton, "Common_AdminRequired");
+
+        var dashboardButton = UiFactory.Button("Process_Dashboard", _viewModel.OpenDashboardCommand,
+            variant: ButtonVariant.Subtle, tooltipKey: "Process_Dashboard");
 
         var grid = new Grid
         {
             ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto,Auto"),
-            Margin = new Thickness(20, 12)
+            Margin = new Thickness(24, 14)
         };
-        Grid.SetColumn(title, 0);
-        Grid.SetColumn(themeCombo, 1);
-        Grid.SetColumn(languageCombo, 2);
+        Grid.SetColumn(titleRow, 0);
+        Grid.SetColumn(_themeCombo, 1);
+        Grid.SetColumn(_languageCombo, 2);
         Grid.SetColumn(adminButton, 3);
         Grid.SetColumn(dashboardButton, 4);
-        grid.Children.Add(title);
-        grid.Children.Add(themeCombo);
-        grid.Children.Add(languageCombo);
+        grid.Children.Add(titleRow);
+        grid.Children.Add(_themeCombo);
+        grid.Children.Add(_languageCombo);
         grid.Children.Add(adminButton);
         grid.Children.Add(dashboardButton);
-        return grid;
+
+        return new Border
+        {
+            Child = grid,
+            Background = ThemeService.Brush("SaHeaderBrush"),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            BorderBrush = ThemeService.Brush("SaDividerBrush")
+        };
     }
 
     private Control BuildStatusBar()
     {
-        var status = new TextBlock { FontSize = 11, Opacity = 0.7 };
+        var status = new TextBlock { FontSize = 11, Classes = { "muted" },
+            VerticalAlignment = VerticalAlignment.Center };
         status.Bind(TextBlock.TextProperty,
             new Binding(nameof(MainWindowViewModel.GlobalStatus)) { Source = _viewModel });
+
+        var chipText = new TextBlock
+        {
+            Text = "v" + ServiceHub.Instance.Update.CurrentVersion,
+            FontSize = 11,
+            Foreground = ThemeService.Brush("SaAccentBrush"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var chip = new Border { Classes = { "chip" }, Child = chipText,
+            VerticalAlignment = VerticalAlignment.Center };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            Margin = new Thickness(24, 8) };
+        Grid.SetColumn(status, 0);
+        Grid.SetColumn(chip, 1);
+        grid.Children.Add(status);
+        grid.Children.Add(chip);
+
         return new Border
         {
-            Child = status,
-            Padding = new Thickness(20, 7),
+            Child = grid,
+            Background = ThemeService.Brush("SaHeaderBrush"),
             BorderThickness = new Thickness(0, 1, 0, 0),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(35, 128, 128, 128))
+            BorderBrush = ThemeService.Brush("SaDividerBrush")
         };
     }
 
     private void UpdateContent()
     {
-        _contentHost.Content = _viewModel.CurrentPage is null
-            ? null
-            : PageViewLocator.Create(_viewModel.CurrentPage);
+        var page = _viewModel.CurrentPage;
+        if (page is null)
+        {
+            _contentHost.Content = null;
+            return;
+        }
+        if (!_viewCache.TryGetValue(page, out var view))
+        {
+            view = PageViewLocator.Create(page);
+            _viewCache[page] = view;
+        }
+        _contentHost.Content = view;
     }
 
     private void HighlightNavigation()
     {
         foreach (var (item, button) in _navButtons)
-            button.Background = item.Kind == _viewModel.SelectedKind ? SelectedBrush : Brushes.Transparent;
+        {
+            button.Classes.Remove("navSelected");
+            if (item.Kind == _viewModel.SelectedKind) button.Classes.Add("navSelected");
+        }
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        if (_themeHandler is not null) ThemeService.ThemeChanged -= _themeHandler;
+        if (_languageHandler is not null) LocalizationService.Instance.LanguageChanged -= _languageHandler;
         _viewModel.Dispose();
         ServiceHub.Instance.Dispose();
+        _viewCache.Clear();
         base.OnClosed(e);
     }
 }

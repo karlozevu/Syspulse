@@ -1,34 +1,75 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- 所有颜色都使用 FluentTheme 的动态资源，浅色 / 深色主题切换时自动跟随 -->
+    <!--
+      统一视觉语言：所有自定义颜色都来自 ThemeService 维护的 Sa* 调色板，
+      浅色 / 深色 / 跟随系统均能保持可读性；字号与间距收敛成一套刻度。
+    -->
+
+    <!-- ============ 容器 ============ -->
     <Style Selector="Border.card">
         <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundAltHighBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SaCardBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="Padding" Value="16" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="18" />
     </Style>
 
     <Style Selector="Border.subtle">
-        <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundListLowBrush}" />
-        <Setter Property="CornerRadius" Value="6" />
-        <Setter Property="Padding" Value="10" />
+        <Setter Property="Background" Value="{DynamicResource SaHeaderBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SaDividerBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="12" />
     </Style>
 
+    <Style Selector="Border.chip">
+        <Setter Property="Background" Value="{DynamicResource SaAccentSoftBrush}" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="Padding" Value="10,3" />
+    </Style>
+
+    <Style Selector="Border.hero">
+        <Setter Property="Background" Value="{DynamicResource SaAccentSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SaAccentBrush}" />
+        <Setter Property="BorderThickness" Value="3,1,1,1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="18" />
+    </Style>
+
+    <!-- ============ 字号刻度 ============ -->
     <Style Selector="TextBlock.h1">
-        <Setter Property="FontSize" Value="24" />
+        <Setter Property="FontSize" Value="22" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="TextBlock.h2">
-        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Margin" Value="0,0,0,10" />
     </Style>
 
+    <Style Selector="TextBlock.h3">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.body">
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style Selector="TextBlock.caption">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{DynamicResource SaMutedTextBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.value">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
     <Style Selector="TextBlock.muted">
-        <Setter Property="Opacity" Value="0.65" />
         <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource SaMutedTextBrush}" />
     </Style>
 
     <Style Selector="TextBlock.mono">
@@ -36,27 +77,93 @@
         <Setter Property="FontSize" Value="12" />
     </Style>
 
+    <!-- ============ 语义色（深色主题同样可读） ============ -->
     <Style Selector="TextBlock.warn">
-        <Setter Property="Foreground" Value="#B8860B" />
+        <Setter Property="Foreground" Value="{DynamicResource SaWarnBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="TextBlock.danger">
-        <Setter Property="Foreground" Value="#CF222E" />
+        <Setter Property="Foreground" Value="{DynamicResource SaDangerBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.success">
+        <Setter Property="Foreground" Value="{DynamicResource SaSuccessBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- ============ 控件 ============ -->
+    <Style Selector="Button">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinHeight" Value="32" />
+    </Style>
+
+    <Style Selector="Button.accent">
+        <Setter Property="Background" Value="{DynamicResource SaAccentBrush}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!-- 破坏性操作统一使用危险样式，配合二次确认降低误点率 -->
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="{DynamicResource SaDangerSoftBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource SaDangerBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SaDangerBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="Button.subtle">
+        <Setter Property="Background" Value="{DynamicResource SaHeaderBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SaDividerBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <Style Selector="Button.nav">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="10,9" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+    </Style>
+
+    <Style Selector="Button.navSelected">
+        <Setter Property="Background" Value="{DynamicResource SaAccentSoftBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource SaAccentBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style Selector="Button.tableHeader">
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Background" Value="{DynamicResource SaHeaderBrush}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="Padding" Value="8,6" />
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="FontSize" Value="12" />
     </Style>
 
+    <Style Selector="TextBox">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="8,6" />
+    </Style>
+
+    <Style Selector="ComboBox">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="MinHeight" Value="32" />
+    </Style>
+
+    <Style Selector="TabItem">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Padding" Value="12,8" />
+    </Style>
+
     <Style Selector="Separator.v">
-        <Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseLowBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SaDividerBrush}" />
     </Style>
 </Styles>

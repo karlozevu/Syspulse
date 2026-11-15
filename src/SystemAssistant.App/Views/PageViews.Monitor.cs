@@ -54,7 +54,7 @@ public static partial class PageViewLocator
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(HardwareViewModel.SensorButtonKey))
-                sensorButton.Content = LocalizationService.Instance.Get(vm.SensorButtonKey);
+                SystemAssistant.App.Services.Localize.SetKey(sensorButton, vm.SensorButtonKey);
         };
 
         var toolbar = UiFactory.Toolbar(
@@ -122,7 +122,7 @@ public static partial class PageViewLocator
             Spacing = 8,
             Children =
             {
-                UiFactory.Plain(LocalizationService.Instance.Get("Hardware_SensorsCount") + ": "),
+                UiFactory.Text("Hardware_SensorsCount"),
                 UiFactory.BoundText(vm, nameof(HardwareViewModel.SensorCount))
             }
         });

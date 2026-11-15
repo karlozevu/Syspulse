@@ -162,9 +162,17 @@ internal sealed class SystemJunkScanProvider : IScanProvider
             }
             catch (IOException) { }
         }
-        items.AddRange(ScanItemBuilder.FromFiles(
-            new[] { Path.Combine(windows, "MEMORY.DMP"), Path.Combine(windows, "Minidump", "*.dmp") }
-                .Where(p => !p.Contains('*')),
+        // 通配符必须真正展开：原先用 .Where(p => !p.Contains('*')) 把 *.dmp 整项丢掉，
+        // 导致 Minidump 转储清理永远为空。
+        var dumpFiles = new List<string> { Path.Combine(windows, "MEMORY.DMP") };
+        try
+        {
+            var minidumpDir = Path.Combine(windows, "Minidump");
+            if (Directory.Exists(minidumpDir))
+                dumpFiles.AddRange(Directory.EnumerateFiles(minidumpDir, "*.dmp"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        items.AddRange(ScanItemBuilder.FromFiles(dumpFiles,
             ScanCategory.ErrorDump, RiskLevel.Medium, "系统内存转储文件", whitelist));
 
         return Task.FromResult<IReadOnlyList<ScanItem>>(items);
@@ -219,19 +227,14 @@ internal sealed class BrowserScanProvider : IScanProvider
                             RiskLevel.Low, $"{browser} 浏览器缓存（{Path.GetFileName(profile)}）", whitelist, token));
                 }
 
-                if (options.ScanBrowserHistory)
+                // Chromium 的下载记录就存放在 History 这个 SQLite 库里，没有独立文件。
+                // 若两个选项各自生成一个同路径条目，CleanService 去重后「下载记录」分类会整体消失，
+                // 因此合并为一条，并在描述里明确它同时包含下载记录。
+                if (options.ScanBrowserHistory || options.ScanBrowserDownloads)
                 {
                     items.AddRange(ScanItemBuilder.FromFiles(new[] { Path.Combine(profile, "History") },
                         ScanCategory.BrowserHistory, RiskLevel.High,
-                        $"{browser} 历史记录（删除后无法恢复）", whitelist));
-                }
-                if (options.ScanBrowserDownloads)
-                {
-                    items.AddRange(ScanItemBuilder.FromFiles(new[] { Path.Combine(profile, "History") },
-                        ScanCategory.BrowserDownloads, RiskLevel.High,
-                        $"{browser} 下载记录（与历史记录同库）", whitelist)
-                        .Select(i => ScanItemBuilder.Custom(i.Path, ScanCategory.BrowserDownloads,
-                            RiskLevel.High, i.Description, i.SizeBytes)));
+                        $"{browser} 历史记录（含下载记录，同库，删除后无法恢复）", whitelist));
                 }
                 if (options.ScanBrowserCookies)
                 {

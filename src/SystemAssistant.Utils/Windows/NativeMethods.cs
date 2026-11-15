@@ -53,12 +53,14 @@ internal static class NativeMethods
     [StructLayout(LayoutKind.Sequential)]
     internal struct IoCounters
     {
+        // 必须与 Win32 IO_COUNTERS 定义一致：三个 *OperationCount 在前，
+        // 三个 *TransferCount 在后（Read / Write / Other 顺序）。
         public ulong ReadOperationCount;
         public ulong WriteOperationCount;
         public ulong OtherOperationCount;
-        public ulong OtherTransferCount;
         public ulong ReadTransferCount;
         public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

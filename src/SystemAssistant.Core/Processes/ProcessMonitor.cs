@@ -12,7 +12,8 @@ namespace SystemAssistant.Core.Processes;
 /// </summary>
 public sealed class ProcessMonitor : IProcessMonitor, IDisposable
 {
-    private readonly Dictionary<int, Sample> _previous = new();
+    // 历史键包含 PID + 启动时间，避免 PID 复用时把新进程的计数器当成旧进程做差
+    private readonly Dictionary<(int Pid, long StartTicks), Sample> _previous = new();
     private readonly Dictionary<int, string> _owners = new();
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
@@ -22,6 +23,9 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
 
     public int RefreshIntervalMs { get; set; } = 2000;
     public bool IsRunning => _worker is { IsCompleted: false };
+
+    /// <summary>最近一次采样循环的错误，供界面降级提示（不对外抛出）。</summary>
+    public string LastError { get; private set; } = string.Empty;
 
     public void Start()
     {
@@ -62,7 +66,7 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
                     timer.Period = TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000));
 
                 var snapshot = SampleOnce();
-                SnapshotUpdated?.Invoke(snapshot);
+                RaiseSnapshotUpdated(snapshot);
 
                 if (DateTime.UtcNow - lastOwnerRefresh > TimeSpan.FromMinutes(1))
                 {
@@ -72,12 +76,29 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // 兜底：采样循环里的任何异常都必须被观察并记录，避免变成进程级未观察任务异常
+            LastError = "进程采样已停止：" + ex.Message;
+        }
+    }
+
+    /// <summary>逐个订阅者调用，单个订阅者抛异常不影响其它订阅者与采集循环。</summary>
+    private void RaiseSnapshotUpdated(IReadOnlyList<ProcessSnapshot> snapshot)
+    {
+        var handlers = SnapshotUpdated;
+        if (handlers is null) return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action<IReadOnlyList<ProcessSnapshot>>)handler)(snapshot); }
+            catch (Exception ex) { LastError = "快照订阅者异常：" + ex.Message; }
+        }
     }
 
     private IReadOnlyList<ProcessSnapshot> SampleOnce()
     {
         var now = DateTime.UtcNow;
-        var current = new Dictionary<int, Sample>();
+        var current = new Dictionary<(int Pid, long StartTicks), Sample>();
         var result = new List<ProcessSnapshot>();
 
         foreach (var process in Process.GetProcesses())
@@ -90,24 +111,30 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
                     var cpuTicks = process.TotalProcessorTime.Ticks;
                     var workingSet = process.WorkingSet64;
                     var startTime = process.StartTime;
+                    var startTicks = startTime.Ticks;
                     var threads = process.Threads.Count;
                     string path = string.Empty;
                     try { path = process.MainModule?.FileName ?? string.Empty; } catch { }
                     var (readBytes, writeBytes) = WindowsNativeInfo.GetProcessIoBytes(process.Handle);
 
+                    var key = (Pid: pid, StartTicks: startTicks);
                     var sample = new Sample(now, cpuTicks, readBytes, writeBytes);
-                    current[pid] = sample;
+                    current[key] = sample;
 
                     double cpuPercent = 0, readPerSecond = 0, writePerSecond = 0;
                     lock (_sync)
                     {
-                        if (_previous.TryGetValue(pid, out var old))
+                        if (_previous.TryGetValue(key, out var old))
                         {
                             var seconds = Math.Max(0.001, (now - old.Timestamp).TotalSeconds);
-                            cpuPercent = (cpuTicks - old.CpuTicks) / TimeSpan.TicksPerSecond / seconds
+                            var cpuDelta = Math.Max(0L, cpuTicks - old.CpuTicks);
+                            cpuPercent = cpuDelta / TimeSpan.TicksPerSecond / seconds
                                          / Environment.ProcessorCount * 100;
-                            readPerSecond = Math.Max(0, (readBytes - old.ReadBytes) / seconds);
-                            writePerSecond = Math.Max(0, (writeBytes - old.WriteBytes) / seconds);
+                            // ulong 计数器可能回绕 / 复位，必须先比较再相减，否则会下溢成巨大值
+                            var readDelta = readBytes >= old.ReadBytes ? readBytes - old.ReadBytes : 0UL;
+                            var writeDelta = writeBytes >= old.WriteBytes ? writeBytes - old.WriteBytes : 0UL;
+                            readPerSecond = readDelta / seconds;
+                            writePerSecond = writeDelta / seconds;
                         }
                         _owners.TryGetValue(pid, out var owner);
                         result.Add(new ProcessSnapshot
@@ -136,7 +163,7 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
         lock (_sync)
         {
             _previous.Clear();
-            foreach (var (pid, sample) in current) _previous[pid] = sample;
+            foreach (var (key, sample) in current) _previous[key] = sample;
         }
         return result;
     }

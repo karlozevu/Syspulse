@@ -14,8 +14,11 @@ public sealed class BatteryInfo
     /// <summary>剩余电量（mWh）。</summary>
     public int RemainingCapacityMwh { get; init; }
 
-    /// <summary>电池损耗百分比（0 = 无损耗，100 = 完全失效）。</summary>
-    public double WearPercent => DesignCapacityMwh <= 0
+    /// <summary>满充容量是否已知；为 false 时损耗率无意义，界面应显示「未知」。</summary>
+    public bool IsFullChargeCapacityKnown => FullChargeCapacityMwh > 0;
+
+    /// <summary>电池损耗百分比（0 = 无损耗，100 = 完全失效）；容量未知时返回 0，需配合 <see cref="IsFullChargeCapacityKnown"/> 判断。</summary>
+    public double WearPercent => !IsFullChargeCapacityKnown || DesignCapacityMwh <= 0
         ? 0
         : Math.Clamp((1 - FullChargeCapacityMwh * 1.0 / DesignCapacityMwh) * 100, 0, 100);
 
