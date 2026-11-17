@@ -46,9 +46,10 @@ public sealed class CommandRunner
         var psi = CreateStartInfo(fileName, arguments);
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
+        Process? process = null;
         try
         {
-            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (stdout) stdout.AppendLine(e.Data); };
             process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (stderr) stderr.AppendLine(e.Data); };
             process.Start();
@@ -62,9 +63,19 @@ public sealed class CommandRunner
                 StandardError = stderr.ToString()
             };
         }
+        catch (OperationCanceledException)
+        {
+            // 取消时结束子进程，避免 reg.exe / 网络命令成为孤儿继续运行。
+            if (process is not null) KillProcessTree(process);
+            return new CommandExecutionResult { ExitCode = -1, StandardError = "用户取消了操作" };
+        }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             return new CommandExecutionResult { ExitCode = -1, StandardError = ex.Message };
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 
@@ -73,10 +84,11 @@ public sealed class CommandRunner
         var psi = CreateStartInfo("cmd.exe", $"/d /s /c \"{commandLine.Replace("\"", "\\\"")}\"");
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
+        Process? process = null;
 
         try
         {
-            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            process = new Process { StartInfo = psi, EnableRaisingEvents = true };
             process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is null) return;
@@ -104,12 +116,19 @@ public sealed class CommandRunner
         }
         catch (OperationCanceledException)
         {
+            // 取消必须结束整个进程树：cmd.exe 及其派生的 sfc / defrag 子进程
+            // 可能运行数十分钟，只停止等待会留下持续改动系统的孤儿进程。
+            if (process is not null) KillProcessTree(process);
             return new CommandExecutionResult { ExitCode = -1, StandardError = "用户取消了操作" };
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             OutputReceived?.Invoke(new CommandOutputLine { Text = ex.Message, IsError = true });
             return new CommandExecutionResult { ExitCode = -1, StandardError = ex.Message };
+        }
+        finally
+        {
+            process?.Dispose();
         }
     }
 
@@ -154,6 +173,7 @@ public sealed class CommandRunner
             }
 
             long lastPosition = 0;
+            byte[]? pendingBytes = null;
             var output = new StringBuilder();
             while (!process.HasExited)
             {
@@ -162,7 +182,7 @@ public sealed class CommandRunner
                     KillProcessTree(process);
                     return new CommandExecutionResult { ExitCode = -1, StandardError = "用户取消了操作" };
                 }
-                lastPosition = DrainLog(log, lastPosition, output);
+                lastPosition = DrainLog(log, lastPosition, output, ref pendingBytes);
                 try { await Task.Delay(250, token); }
                 catch (OperationCanceledException)
                 {
@@ -171,7 +191,16 @@ public sealed class CommandRunner
                 }
             }
             await process.WaitForExitAsync(CancellationToken.None);
-            lastPosition = DrainLog(log, lastPosition, output);
+            lastPosition = DrainLog(log, lastPosition, output, ref pendingBytes);
+            // 进程已退出，残留的不完整序列以替换字符形式冲出（避免丢失尾部字节）
+            if (pendingBytes is { Length: > 0 })
+            {
+                var tail = new string(Encoding.UTF8.GetChars(pendingBytes));
+                output.Append(tail);
+                foreach (var line in tail.Replace("\r\n", "\n").Split('\n'))
+                    if (!string.IsNullOrWhiteSpace(line))
+                        OutputReceived?.Invoke(new CommandOutputLine { Text = line });
+            }
 
             var exitCode = -1;
             if (File.Exists(code) && int.TryParse(File.ReadAllText(code).Trim(), out var parsed)) exitCode = parsed;
@@ -203,10 +232,14 @@ public sealed class CommandRunner
             if (!process.HasExited) process.Kill(entireProcessTree: true);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception
-                                      or NotSupportedException) { }
+                                      or NotSupportedException or AggregateException) { }
     }
 
-    private long DrainLog(string logPath, long position, StringBuilder output)
+    /// <summary>
+    /// 增量读取日志。按字节位置 Seek 可能在多字节 UTF-8 字符中间截断，
+    /// 用 Decoder 的跨调用状态（pending 字节）保证汉字不被解码成乱码。
+    /// </summary>
+    private long DrainLog(string logPath, long position, StringBuilder output, ref byte[]? pending)
     {
         try
         {
@@ -214,16 +247,42 @@ public sealed class CommandRunner
             using var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (stream.Length <= position) return position;
             stream.Seek(position, SeekOrigin.Begin);
-            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            var text = reader.ReadToEnd();
-            output.Append(text);
-
-            foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+            var count = (int)Math.Min(stream.Length - position, int.MaxValue);
+            var bytes = new byte[count];
+            var read = 0;
+            while (read < count)
             {
-                if (!string.IsNullOrWhiteSpace(line))
-                    OutputReceived?.Invoke(new CommandOutputLine { Text = line });
+                var n = stream.Read(bytes, read, count - read);
+                if (n == 0) break;
+                read += n;
             }
-            return stream.Position;
+            var newPosition = stream.Position;
+
+            // 把上次残留的半个字符字节拼到本次前面一起解码
+            var total = (pending?.Length ?? 0) + read;
+            var combined = new byte[total];
+            if (pending is not null) Buffer.BlockCopy(pending, 0, combined, 0, pending.Length);
+            Buffer.BlockCopy(bytes, 0, combined, pending?.Length ?? 0, read);
+
+            // Convert 明确返回本次实际消费的字节数：结尾处不完整的多字节序列
+            // 会留在输入中不被消费，作为 pending 留给下一次轮询。
+            var decoder = Encoding.UTF8.GetDecoder();
+            var chars = new char[combined.Length + 1];
+            decoder.Convert(combined, 0, combined.Length, chars, 0, chars.Length,
+                flush: false, out var usedBytes, out var charCount, out _);
+            var text = new string(chars, 0, charCount);
+            pending = usedBytes < combined.Length ? combined[usedBytes..] : null;
+
+            if (text.Length > 0)
+            {
+                output.Append(text);
+                foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                        OutputReceived?.Invoke(new CommandOutputLine { Text = line });
+                }
+            }
+            return newPosition;
         }
         catch (IOException)
         {

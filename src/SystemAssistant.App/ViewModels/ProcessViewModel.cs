@@ -104,7 +104,7 @@ public sealed class ProcessViewModel : ViewModelBase
             process.ExecutablePath);
         if (!confirmed) return;
         var result = await Services.ProcessService.KillAsync(process.ProcessId, tree);
-        StatusMessage = result.Success ? result.Message : result.Message;
+        StatusMessage = result.Message;
         if (!result.Success) await DialogService.ErrorAsync(result.Message);
     }
 

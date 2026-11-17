@@ -71,10 +71,31 @@ public sealed class CleanService : ICleanService
             }
         }
 
-        // 去重：同一路径可能被多个提供者命中（例如用户临时目录同时是应用缓存目录）
+        // 去重：同一路径可能被多个提供者命中（例如用户临时目录同时是应用缓存目录）。
+        // 必须取"最高"风险：若取最低，CustomPathScanProvider 标记的 High 项会被
+        // SystemJunkScanProvider 的 Low 项覆盖成默认勾选，绕过二次确认直接删除。
         var maxItems = options.MaxFileCount > 0 ? options.MaxFileCount : int.MaxValue;
         var distinct = items.GroupBy(i => i.Path, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.OrderBy(i => (int)i.Risk).First())
+            .Select(g =>
+            {
+                var representative = g.OrderByDescending(i => (int)i.Risk).First();
+                // 任一提供者要求重启则保留；只有所有命中项都勾选才默认勾选（保守）。
+                // ScanItem 是可变 class 而非 record，这里手动复制字段构造新实例。
+                return new ScanItem
+                {
+                    Id = representative.Id,
+                    Category = representative.Category,
+                    DisplayName = representative.DisplayName,
+                    Path = representative.Path,
+                    SizeBytes = representative.SizeBytes,
+                    Risk = representative.Risk,
+                    IsDirectory = representative.IsDirectory,
+                    IsRegistryEntry = representative.IsRegistryEntry,
+                    Description = representative.Description,
+                    IsChecked = g.All(i => i.IsChecked),
+                    RequiresRestart = g.Any(i => i.RequiresRestart)
+                };
+            })
             .OrderBy(i => (int)i.Category).ThenByDescending(i => i.SizeBytes)
             .Take(maxItems)
             .ToArray();
@@ -130,11 +151,13 @@ public sealed class CleanService : ICleanService
 
         if (candidates.Any(i => i.IsRegistryEntry) && !_registryBackupDone)
         {
-            var message = "未检测到本次会话的注册表备份，已拒绝执行注册表删除";
+            var registryCount = candidates.Count(i => i.IsRegistryEntry);
+            var message = $"未检测到本次会话的注册表备份，已拒绝执行 {registryCount} 项注册表删除";
             errors.Add(message);
             _log.Log(OperationType.Security, "拒绝注册表清理", message, false);
             candidates = candidates.Where(i => !i.IsRegistryEntry).ToArray();
-            failed++;
+            // 每一项被拒绝的注册表项都应计入失败，而不是整体只加 1。
+            failed += registryCount;
         }
 
         var index = 0;

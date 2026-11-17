@@ -28,15 +28,21 @@ public static class WindowsNativeInfo
         }
     }
 
-    private static long _prevIdle;
-    private static long _prevTotal;
+    private sealed class CpuSample
+    {
+        public long PrevIdle;
+        public long PrevTotal;
+    }
+    // 按消费者隔离采样基准：SensorMonitor 曲线、硬件详情、报告生成、状态栏各自独立，
+    // 避免共享一组 _prevIdle/_prevTotal 时彼此"偷走"采样间隔、导致数值忽高忽低。
+    private static readonly Dictionary<string, CpuSample> CpuSamples = new(StringComparer.Ordinal);
     private static readonly object CpuSync = new();
 
     /// <summary>
     /// 通过 GetSystemTimes 的两次采样差值计算全局 CPU 占用率。
     /// 首次调用返回 null（尚无基准值），调用方应回落到 WMI LoadPercentage。
     /// </summary>
-    public static double? GetCpuUsagePercent()
+    public static double? GetCpuUsagePercent(string consumer = "default")
     {
         lock (CpuSync)
         {
@@ -45,16 +51,21 @@ public static class WindowsNativeInfo
                 if (!GetSystemTimes(out var idle, out var kernel, out var user)) return null;
                 var idleTicks = (long)idle.Value;
                 var totalTicks = (long)(kernel.Value + user.Value);
-                if (_prevTotal == 0)
+                if (!CpuSamples.TryGetValue(consumer, out var sample))
                 {
-                    _prevIdle = idleTicks;
-                    _prevTotal = totalTicks;
+                    sample = new CpuSample();
+                    CpuSamples[consumer] = sample;
+                }
+                if (sample.PrevTotal == 0)
+                {
+                    sample.PrevIdle = idleTicks;
+                    sample.PrevTotal = totalTicks;
                     return null;
                 }
-                var deltaIdle = idleTicks - _prevIdle;
-                var deltaTotal = totalTicks - _prevTotal;
-                _prevIdle = idleTicks;
-                _prevTotal = totalTicks;
+                var deltaIdle = idleTicks - sample.PrevIdle;
+                var deltaTotal = totalTicks - sample.PrevTotal;
+                sample.PrevIdle = idleTicks;
+                sample.PrevTotal = totalTicks;
                 if (deltaTotal <= 0) return null;
                 return Math.Clamp((1 - deltaIdle * 1.0 / deltaTotal) * 100, 0, 100);
             }
@@ -110,7 +121,9 @@ public static class WindowsNativeInfo
 
                 bool? hdr = null;
                 var order = result.Count;
-                if (hdrStates.Count > 0) hdr = order < hdrStates.Count ? hdrStates[order] : hdrStates[0];
+                // 无法对应到某块屏时保持"未知"，绝不能回退到首屏的 HDR 状态
+                // ——那会把 A 屏的开启/关闭错误套到 B 屏上。
+                if (hdrStates.Count > 0 && order < hdrStates.Count) hdr = hdrStates[order];
 
                 result.Add(new DisplayInfo
                 {

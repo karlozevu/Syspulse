@@ -56,8 +56,15 @@ public sealed class TableView : UserControl
     private Border? _selectedBorder;
     private RowView? _selectedRow;
     private object? _selectedItem;
+    private object? _selectedKey;
     private bool _suppressCheckEvents;
     private bool _languageHooked;
+
+    /// <summary>
+    /// 可选的稳定行标识选择器。实时刷新的列表（如进程表）每帧都是新对象，
+    /// 引用比较必然失配；设置此选择器后按稳定键（如 PID）恢复选中态。
+    /// </summary>
+    public Func<object, object?>? ItemKeySelector { get; set; }
 
     public TableView()
     {
@@ -148,11 +155,22 @@ public sealed class TableView : UserControl
     public void SetItems(System.Collections.IEnumerable items)
     {
         var previous = _selectedItem;
+        var previousKey = _selectedKey;
         var list = items.Cast<object?>().Where(i => i is not null).Select(i => i!).ToList();
         _rowViews.Clear();
-        _selectedItem = previous is not null
-            ? list.FirstOrDefault(x => ReferenceEquals(x, previous))
-            : null;
+        // 优先按稳定键恢复（进程表每帧都是新对象，引用匹配必然失效）；
+        // 未设置 ItemKeySelector 时回落引用匹配。
+        if (previous is not null && ItemKeySelector is not null && previousKey is not null)
+        {
+            _selectedItem = list.FirstOrDefault(x => Equals(ItemKeySelector(x), previousKey));
+        }
+        else
+        {
+            _selectedItem = previous is not null
+                ? list.FirstOrDefault(x => ReferenceEquals(x, previous))
+                : null;
+        }
+        if (_selectedItem is null) _selectedKey = null;
         _selectedBorder = null;
         _selectedRow = null;
         _rows.ItemTemplate = new FuncDataTemplate<object>((item, _) => BuildRow(item), false);
@@ -286,6 +304,7 @@ public sealed class TableView : UserControl
             _selectedBorder = border;
             _selectedRow = row;
             _selectedItem = item;
+            _selectedKey = ItemKeySelector?.Invoke(item);
             border.Background = ThemeService.Brush("SaSelectionBrush");
             SelectionChanged?.Invoke(item);
         };
@@ -301,6 +320,20 @@ public sealed class TableView : UserControl
         };
         border.DoubleTapped += (_, _) => RowDoubleTapped?.Invoke(item);
         return border;
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        // 页面 View 按 ViewModel 缓存：切走时 OnDetached 解绑了语言 / 主题事件，
+        // 切回时不会重新调用 Configure()。必须在这里补挂，否则缓存页切回后
+        // 切换语言 / 主题，数据行文本与行背景永久停留在旧状态。
+        if (!_languageHooked)
+        {
+            _languageHooked = true;
+            LocalizationService.Instance.LanguageChanged += OnLanguageChanged;
+            ThemeService.ThemeChanged += OnThemeChanged;
+        }
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)

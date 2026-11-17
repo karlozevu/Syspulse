@@ -22,6 +22,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _customPathsText = string.Empty;
     private string _updateUrl = string.Empty;
     private string _updateMessage = string.Empty;
+    private SystemAssistant.Models.Common.AppVersionInfo? _lastUpdateInfo;
 
     public SettingsViewModel()
     {
@@ -111,9 +112,8 @@ public sealed class SettingsViewModel : ViewModelBase
         var urlChanged = !string.Equals(Services.Settings.Current.UpdateCheckUrl, UpdateUrl.Trim(), StringComparison.Ordinal);
         if (urlChanged) Services.Settings.Update(s => s.UpdateCheckUrl = UpdateUrl.Trim());
         var info = await Services.Update.CheckAsync();
-        UpdateMessage = info.HasUpdate
-            ? LF("Update_Available", info.LatestVersion, info.CurrentVersion) + "  " + info.ReleaseNotes
-            : info.Message;
+        _lastUpdateInfo = info;
+        UpdateMessage = BuildUpdateMessage(info);
         StatusMessage = UpdateMessage;
     }
 
@@ -141,6 +141,16 @@ public sealed class SettingsViewModel : ViewModelBase
     private void OnSettingsChanged()
     {
         if (ReloadTextFields()) RaiseAll();
+    }
+
+    private string BuildUpdateMessage(SystemAssistant.Models.Common.AppVersionInfo info) =>
+        info.HasUpdate
+            ? LF("Update_Available", info.LatestVersion, info.CurrentVersion) + "  " + info.ReleaseNotes
+            : info.Message;
+
+    protected override void OnLanguageChanged()
+    {
+        if (_lastUpdateInfo is not null) UpdateMessage = BuildUpdateMessage(_lastUpdateInfo);
     }
 
     public override void Dispose()

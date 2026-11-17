@@ -170,7 +170,9 @@ public sealed class HardwareInfoService : IHardwareInfoService
                 Name = adapter.String("NetConnectionID", "Name"),
                 MacAddress = adapter.String("MACAddress"),
                 IpAddresses = ips ?? string.Empty,
-                Speed = speed > 0 ? FormatHelper.FormatBytes(speed) + "/s" : string.Empty,
+                // Win32_NetworkAdapter.Speed 的单位是 bit/s，必须先除以 8 才是字节/秒，
+                // 否则千兆网卡会显示成 953 MB/s（实际约 119 MB/s）。
+                Speed = speed > 0 ? FormatHelper.FormatSpeed(speed / 8.0) : string.Empty,
                 IsEnabled = true
             });
         }
@@ -221,7 +223,7 @@ public sealed class HardwareInfoService : IHardwareInfoService
             L1CacheKB = l1Cache,
             L2CacheKB = l2Cache,
             L3CacheKB = l3Cache,
-            UsagePercent = WindowsNativeInfo.GetCpuUsagePercent() ?? processor?.Double("LoadPercentage") ?? 0,
+            UsagePercent = WindowsNativeInfo.GetCpuUsagePercent("hardware-detail") ?? processor?.Double("LoadPercentage") ?? 0,
             CurrentClockMHz = processor?.Double("CurrentClockSpeed") ?? 0
         };
 
@@ -324,20 +326,20 @@ public sealed class HardwareInfoService : IHardwareInfoService
             gpus.Add(gpu);
         }
 
-        // 传感器实时数据按显卡名称模糊匹配
-        var readings = _sensors?.LatestReadings
-            .Where(r => r.HardwareName.Contains("GPU", StringComparison.OrdinalIgnoreCase)
-                        || r.Identifier.Contains("gpu", StringComparison.OrdinalIgnoreCase))
-            .ToList() ?? new List<SensorReading>();
+        // 传感器实时数据按 GPU 硬件序号匹配（Identifier 形如 /gpu-nvidia/0/temperature/3）。
+        // 不能按型号关键词匹配：LHM 的 HardwareName 只有 "GPU GpuNvidia" 之类，不含
+        // "RTX 3080" 这样的型号，旧实现 Contains(keyword) 恒为 false、实时读数全部丢失。
+        var readings = _sensors?.LatestReadings;
+        var gpuReadings = readings is null
+            ? Array.Empty<SensorReading>()
+            : readings.Where(r => r.Identifier.StartsWith("/gpu", StringComparison.OrdinalIgnoreCase)
+                                  || r.HardwareName.Contains("GPU", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-        foreach (var gpu in gpus)
+        for (var i = 0; i < gpus.Count; i++)
         {
-            var matched = readings.Where(r =>
-            {
-                var shortName = gpu.Name.Split('(')[0].Trim();
-                var keyword = shortName.Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? shortName;
-                return r.HardwareName.Contains(keyword, StringComparison.OrdinalIgnoreCase);
-            }).ToList();
+            var gpu = gpus[i];
+            var matched = gpuReadings.Where(r => MatchGpuIndex(r.Identifier, i, gpus.Count)).ToList();
+            if (matched.Count == 0) continue;
 
             var temperature = matched.Where(r => r.Kind == SensorKind.Temperature).Select(r => r.Value).ToList();
             if (temperature.Count > 0) gpu.TemperatureCelsius = temperature.Max();
@@ -346,11 +348,31 @@ public sealed class HardwareInfoService : IHardwareInfoService
                 && r.Name.Contains("Core", StringComparison.OrdinalIgnoreCase));
             if (load is not null) gpu.LoadPercent = load.Value;
 
+            // "GPU Memory Used" 在 LHM 中是 SmallData 类型（数值单位固定为 MB），
+            // MapKind 归为 Other、MapUnit 返回空串，因此不能依赖 Unit.Contains("MB")。
             var memory = matched.FirstOrDefault(r =>
-                r.Name.Contains("Memory Used", StringComparison.OrdinalIgnoreCase) && r.Unit.Contains("MB", StringComparison.OrdinalIgnoreCase));
+                r.Name.Contains("Memory Used", StringComparison.OrdinalIgnoreCase));
             if (memory is not null) gpu.VramUsedBytes = (long)(memory.Value * 1024 * 1024);
         }
         return gpus;
+    }
+
+    /// <summary>
+    /// 判断一条 GPU 传感器读数是否属于第 gpuIndex 张显卡。
+    /// LHM Identifier 形如 /gpu-nvidia/0/temperature/3，第二段数字是显卡序号；
+    /// 单卡时全部归给它，多卡按序号对应，无法确定序号时只归第一张避免错配。
+    /// </summary>
+    private static bool MatchGpuIndex(string identifier, int gpuIndex, int gpuCount)
+    {
+        if (gpuCount <= 1) return true;
+        // "/gpu-nvidia/0/temperature/3" 去空分割后为
+        // ["gpu-nvidia", "0", "temperature", "3"]：parts[0] 是硬件类型，parts[1] 才是显卡序号。
+        var parts = identifier.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2 && parts[0].StartsWith("gpu", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(parts[1], out var index))
+            return index == gpuIndex;
+        // 无法解析序号时只归第一张卡，避免错配
+        return gpuIndex == 0;
     }
 
     /// <summary>
@@ -607,7 +629,12 @@ public sealed class HardwareInfoService : IHardwareInfoService
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException) { }
 
-        var predictedFailure = First(WmiRoot, "MSStorageDriver_FailurePredictStatus")?.Bool("PredictFailure") ?? false;
+        // FailurePredictStatus 可能返回多条实例（多物理磁盘）。旧实现固定取首条，
+        // 导致一块盘的故障预测污染所有磁盘。按磁盘索引取对应实例，取不到则视为未报告，
+        // 而不是套用其它盘的结果。
+        var predictStatuses = Select(WmiRoot, "MSStorageDriver_FailurePredictStatus").ToArray();
+        var predictedFailure = index < predictStatuses.Length
+            && predictStatuses[index].Bool("PredictFailure");
         var hasCritical = attributes.Any(a => a.IsWarning);
         var effectiveHealth = health == DiskHealthStatus.Unknown
             ? (predictedFailure || hasCritical ? DiskHealthStatus.Warning : DiskHealthStatus.Unknown)

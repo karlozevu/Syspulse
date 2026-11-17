@@ -25,6 +25,9 @@ public sealed class OptimizationViewModel : ViewModelBase
     private string _pingResult = string.Empty;
     private string _virtualMemory = string.Empty;
     private string _serviceRiskHint = string.Empty;
+    // 缓存组合文本的原始参数，供语言切换后按当前语言重算
+    private (bool IsAutomatic, long InitialMb, long MaximumMb, string Description)? _virtualMemoryInfo;
+    private (string Host, double Latency, double PacketLoss)? _pingInfo;
 
     public OptimizationViewModel()
     {
@@ -130,7 +133,8 @@ public sealed class OptimizationViewModel : ViewModelBase
     {
         TuningItems = Services.Tuning.GetTuningItems();
         var vm = Services.Tuning.GetVirtualMemoryInfo();
-        VirtualMemory = $"{(vm.IsAutomatic ? L("Label_AutoManaged") : $"{vm.InitialSizeMb} ~ {vm.MaximumSizeMb} MB")} · {vm.Description}";
+        _virtualMemoryInfo = (vm.IsAutomatic, vm.InitialSizeMb, vm.MaximumSizeMb, vm.Description);
+        VirtualMemory = BuildVirtualMemoryText();
     }
 
     private async Task SetStartupEnabledAsync(object? parameter, bool enabled)
@@ -203,7 +207,11 @@ public sealed class OptimizationViewModel : ViewModelBase
         if (!IsAdministrator) { StatusMessage = L("Common_AdminRequired"); return; }
         if (SelectedDisk is null) return;
         var disk = SelectedDisk;
-        var drive = disk.Partitions.FirstOrDefault()?.DriveLetter.FirstOrDefault() ?? 'C';
+        // 首个分区存在但 DriveLetter 为空串时，FirstOrDefault() 会得到 '\0'（非法盘符）。
+        // 只有确实读到 A-Z 字母才采用，否则回退 C:。
+        var firstPartition = disk.Partitions.FirstOrDefault();
+        var letter = firstPartition?.DriveLetter.FirstOrDefault() ?? '\0';
+        var drive = letter is >= 'A' and <= 'Z' or >= 'a' and <= 'z' ? letter : 'C';
         var mode = parameter as string ?? "analyze";
 
         // Core 的 MaintainAsync 只按介质类型决定动作，会丢弃按钮传入的 trim/defrag 语义，
@@ -261,7 +269,8 @@ public sealed class OptimizationViewModel : ViewModelBase
         await RunBusyAsync(async () =>
         {
             var result = await Services.Network.TestLatencyAsync(PingHost);
-            PingResult = $"{result.Host} · {result.AverageLatencyMs} ms · {L("Label_PacketLoss")} {result.PacketLossPercent} %";
+            _pingInfo = (result.Host, result.AverageLatencyMs, result.PacketLossPercent);
+            PingResult = BuildPingResultText();
             ConsoleText = result.RawOutput;
         }, L("Optimize_Ping"));
     }
@@ -280,6 +289,23 @@ public sealed class OptimizationViewModel : ViewModelBase
 
     private async Task<bool> ConfirmAsync(string action, string detail)
         => await DialogService.ConfirmHighRiskAsync(action, detail);
+
+    private string BuildVirtualMemoryText() => _virtualMemoryInfo is { } v
+        ? $"{(v.IsAutomatic ? L("Label_AutoManaged") : $"{v.InitialMb} ~ {v.MaximumMb} MB")} · {v.Description}"
+        : string.Empty;
+
+    private string BuildPingResultText() => _pingInfo is { } p
+        ? $"{p.Host} · {p.Latency} ms · {L("Label_PacketLoss")} {p.PacketLoss} %"
+        : string.Empty;
+
+    protected override void OnLanguageChanged()
+    {
+        VirtualMemory = BuildVirtualMemoryText();
+        PingResult = BuildPingResultText();
+        ServiceRiskHint = SelectedService?.IsHighRisk == true
+            ? LF("Optimize_RiskWarning", SelectedService.RiskHint)
+            : string.Empty;
+    }
 
     private void OnCommandOutput(CommandOutputLine line)
     {

@@ -314,7 +314,12 @@ public static partial class PageViewLocator
     // -------------------------------------------------------------- 进程页
     private static Control BuildProcessPage(ProcessViewModel vm)
     {
-        var table = new TableView { Height = 520 };
+        var table = new TableView
+        {
+            Height = 520,
+            // 进程表每次快照都是全新对象，用 PID 作为稳定键恢复选中态
+            ItemKeySelector = o => ((ProcessSnapshot)o).ProcessId
+        };
         table.Configure(new[]
         {
             Col("Process_ColPid", 70, o => ((ProcessSnapshot)o).ProcessId.ToString(), "ProcessId"),

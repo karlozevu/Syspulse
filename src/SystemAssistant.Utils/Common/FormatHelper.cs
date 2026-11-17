@@ -11,6 +11,7 @@ public static class FormatHelper
     public static string FormatBytes(long bytes, int decimals = 1)
     {
         if (bytes <= 0) return "0 B";
+        decimals = Math.Clamp(decimals, 0, 15);
         double value = bytes;
         var unit = 0;
         while (value >= 1024 && unit < Units.Length - 1)
@@ -26,7 +27,9 @@ public static class FormatHelper
     {
         if (double.IsNaN(bytesPerSecond) || double.IsInfinity(bytesPerSecond) || bytesPerSecond < 0)
             return "N/A";
-        return FormatBytes((long)bytesPerSecond) + "/s";
+        // (long) 对超出 Int64 的有限值会 unchecked 溢出成负数，"953 EB" 之类会显示成 0 B/s。
+        var clamped = Math.Min(bytesPerSecond, long.MaxValue);
+        return FormatBytes((long)clamped) + "/s";
     }
 
     /// <summary>
@@ -74,5 +77,6 @@ public static class FormatHelper
         return $"{raw[..4]}-{raw[4..6]}-{raw[6..8]}";
     }
 
-    public static string FormatPercent(double value) => $"{value:F1} %";
+    public static string FormatPercent(double value) =>
+        double.IsNaN(value) || double.IsInfinity(value) ? "N/A" : $"{value:F1} %";
 }

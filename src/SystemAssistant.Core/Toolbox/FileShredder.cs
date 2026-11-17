@@ -85,6 +85,11 @@ public static class FileShredder
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            // 覆写中途磁盘满 / 设备故障时，文件处于"前段已覆写、后段仍为原文"的
+            // 半销毁状态，比不粉碎更危险（用户可能误以为失败而放弃）。与取消路径
+            // 一致：只要写入过就删除并明确告知。
+            if (overwritten)
+                return CleanupAfterCancel(currentPath, overwritten) + $"（写入错误：{ex.Message}）";
             return ex.Message;
         }
     }

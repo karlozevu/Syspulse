@@ -28,6 +28,10 @@ public sealed class CleanerViewModel : ViewModelBase
     private string _warningText = string.Empty;
     private bool _hasResult;
     private string _lastRegistryBackupError = string.Empty;
+    // 缓存扫描摘要的原始数值，供语言切换时按当前语言重算组合文本
+    private int _lastTotalItemCount;
+    private long _lastTotalSizeBytes;
+    private int _lastSkippedCount;
 
     public CleanerViewModel()
     {
@@ -99,8 +103,11 @@ public sealed class CleanerViewModel : ViewModelBase
             var result = await Services.Clean.ScanAsync(BuildOptions(), progress);
             Groups = result.Groups;
             HasResult = true;
-            Summary = LF("Cleaner_Total", result.TotalItemCount, FormatHelper.FormatBytes(result.TotalSizeBytes))
-                      + " · " + LF("Cleaner_Skipped", result.SkippedByWhitelistCount);
+            _lastTotalItemCount = result.TotalItemCount;
+            _lastTotalSizeBytes = result.TotalSizeBytes;
+            _lastSkippedCount = result.SkippedByWhitelistCount;
+            Summary = LF("Cleaner_Total", _lastTotalItemCount, FormatHelper.FormatBytes(_lastTotalSizeBytes))
+                      + " · " + LF("Cleaner_Skipped", _lastSkippedCount);
             WarningText = string.Join(Environment.NewLine, result.Warnings);
             ProgressPercent = 100;
             ProgressText = L("Status_Done");
@@ -247,6 +254,13 @@ public sealed class CleanerViewModel : ViewModelBase
     private void OnSettingsChanged()
     {
         if (ReloadTextFields()) RaiseAll();
+    }
+
+    protected override void OnLanguageChanged()
+    {
+        if (_hasResult)
+            Summary = LF("Cleaner_Total", _lastTotalItemCount, FormatHelper.FormatBytes(_lastTotalSizeBytes))
+                      + " · " + LF("Cleaner_Skipped", _lastSkippedCount);
     }
 
     public override void Dispose()

@@ -22,7 +22,7 @@ public sealed class UpdateCheckService : IUpdateCheckService
 
     public string CurrentVersion =>
         Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?.Split('+')[0] ?? "1.1.1";
+            ?.Split('+')[0] ?? "1.1.2";
 
     public async Task<AppVersionInfo> CheckAsync(CancellationToken token = default)
     {
@@ -55,11 +55,21 @@ public sealed class UpdateCheckService : IUpdateCheckService
                 return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = $"检测失败：HTTP {(int)response.StatusCode}" };
             }
             await using var stream = await response.Content.ReadAsStreamAsync(token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+            // 限制响应体大小：异常 / 恶意服务器返回超大 JSON 时不应耗尽内存。
+            const int maxBytes = 64 * 1024;
+            var buffer = new byte[maxBytes];
+            var total = 0;
+            int read;
+            while (total < maxBytes && (read = await stream.ReadAsync(buffer.AsMemory(total), token)) > 0)
+                total += read;
+            using var document = JsonDocument.Parse(buffer.AsMemory(0, total));
             var root = document.RootElement;
-            var latest = root.TryGetProperty("version", out var v) ? v.GetString() ?? string.Empty : string.Empty;
-            var notes = root.TryGetProperty("notes", out var n) ? n.GetString() ?? string.Empty : string.Empty;
-            var page = root.TryGetProperty("url", out var u) ? u.GetString() ?? string.Empty : string.Empty;
+            // GetString() 仅在 ValueKind == String 时有效；字段是数字 / 数组 / 对象时
+            // 会抛 InvalidOperationException（不在原 catch 列表内，会逃逸 CheckAsync）。
+            static string Str(JsonElement el) => el.ValueKind == JsonValueKind.String ? el.GetString() ?? string.Empty : string.Empty;
+            var latest = root.TryGetProperty("version", out var v) ? Str(v) : string.Empty;
+            var notes = root.TryGetProperty("notes", out var n) ? Str(n) : string.Empty;
+            var page = root.TryGetProperty("url", out var u) ? Str(u) : string.Empty;
 
             return new AppVersionInfo
             {
@@ -72,7 +82,8 @@ public sealed class UpdateCheckService : IUpdateCheckService
             };
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException
-                                      or JsonException or IOException or UriFormatException)
+                                      or JsonException or IOException or UriFormatException
+                                      or InvalidOperationException or ArgumentException)
         {
             return new AppVersionInfo { CurrentVersion = CurrentVersion, Message = "更新检测不可用：" + ex.Message };
         }

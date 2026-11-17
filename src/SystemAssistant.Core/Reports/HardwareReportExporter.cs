@@ -196,13 +196,16 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
 
         if (o.Battery.IsPresent)
         {
+            // 满充容量读不到时损耗率 / 电量百分比都是无意义的 0，直接打印会误导为
+            // "电池零损耗且已耗尽"；这里按 IsFullChargeCapacityKnown 显示未知。
+            var capKnown = o.Battery.IsFullChargeCapacityKnown;
             yield return ("电池", new List<(string, string)>
             {
                 ("设计容量", $"{o.Battery.DesignCapacityMwh} mWh"),
-                ("当前满充容量", $"{o.Battery.FullChargeCapacityMwh} mWh"),
-                ("电池损耗", $"{o.Battery.WearPercent:F1} %"),
+                ("当前满充容量", capKnown ? $"{o.Battery.FullChargeCapacityMwh} mWh" : "N/A"),
+                ("电池损耗", capKnown ? $"{o.Battery.WearPercent:F1} %" : "N/A"),
                 ("循环次数", o.Battery.CycleCount >= 0 ? o.Battery.CycleCount.ToString() : "N/A"),
-                ("剩余电量", $"{o.Battery.ChargePercent:F1} %")
+                ("剩余电量", capKnown ? $"{o.Battery.ChargePercent:F1} %" : "N/A")
             });
         }
 

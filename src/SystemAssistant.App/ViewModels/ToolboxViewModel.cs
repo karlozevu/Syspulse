@@ -219,4 +219,11 @@ public sealed class ToolboxViewModel : ViewModelBase
         if (which == "duplicate") await FindDuplicatesAsync();
         else await FindLargeAsync();
     }
+
+    protected override void OnLanguageChanged()
+    {
+        if (_duplicateGroups.Count > 0)
+            WastedText = L("Toolbox_Wasted") + ": " +
+                         FormatHelper.FormatBytes(_duplicateGroups.Sum(g => g.WastedBytes));
+    }
 }

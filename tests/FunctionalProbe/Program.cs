@@ -10,6 +10,7 @@ using SystemAssistant.Models.Optimization;
 using SystemAssistant.Models.Toolbox;
 using SystemAssistant.Utils.IO;
 using SystemAssistant.Utils.Windows;
+using SystemAssistant.Utils.Common;
 
 // 只读功能探针：逐个调用 Core/Utils 的公开能力，记录真实返回值与异常。
 // 严格不执行任何删除、注册表写入、服务启停、系统命令等写操作。
@@ -236,6 +237,29 @@ await Test("ProcessService.KillAsync(-1) [should reject]", async () =>
 {
     var r = await hub.ProcessService.KillAsync(-1, false);
     return $"{JsonSerializer.Serialize(r)}";
+});
+await TestSync("PathGuard trailing-dot path [should reject]", () =>
+{
+    var p = Environment.GetFolderPath(Environment.SpecialFolder.Windows) + ".";
+    var ok = PathGuard.IsSafeToDelete(p, out var why);
+    return ok ? "UNSAFE: allowed" : $"blocked: {why}";
+});
+
+Emit("");
+Emit("## 八、数值格式化边界（本轮修复回归）");
+await TestSync("FormatSpeed huge value", () =>
+    $"1e30 B/s -> {FormatHelper.FormatSpeed(1e30)}（不得为 0 B/s）");
+await TestSync("FormatBytes decimals clamp", () =>
+    $"decimals=-1 -> {FormatHelper.FormatBytes(2048, -1)}; decimals=99 -> {FormatHelper.FormatBytes(2048, 99)}");
+await TestSync("FormatPercent NaN", () =>
+    $"NaN -> {FormatHelper.FormatPercent(double.NaN)}; Inf -> {FormatHelper.FormatPercent(double.PositiveInfinity)}");
+await TestSync("CpuUsage per-consumer isolation", () =>
+{
+    // 连续交替调用两个消费者，各自首次应返回 null（独立基准），不得互相提供基准
+    var a1 = WindowsNativeInfo.GetCpuUsagePercent("probe-a");
+    var b1 = WindowsNativeInfo.GetCpuUsagePercent("probe-b");
+    var a2 = WindowsNativeInfo.GetCpuUsagePercent("probe-a");
+    return $"a1={a1?.ToString() ?? "null"}, b1={b1?.ToString() ?? "null"}, a2={a2?.ToString() ?? "null"}（a1/b1 均应 null）";
 });
 
 Emit("");

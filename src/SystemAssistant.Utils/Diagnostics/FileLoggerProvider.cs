@@ -42,7 +42,11 @@ public sealed class FileLoggerProvider : ILoggerProvider
     public void Dispose()
     {
         _queue.CompleteAdding();
-        try { _worker.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+        // 等待后台把剩余日志写完再释放队列：原实现超时后立刻 Dispose 队列，
+        // 正在消费的 worker 会抛异常并丢弃积压日志，诊断信息不完整。
+        // 写日志是本地追加、耗时极短，5 秒上限足够，超时应属异常情况。
+        try { _worker.Wait(TimeSpan.FromSeconds(5)); }
+        catch (AggregateException) { /* 写入异常已在 WriteLoop 内逐条吞掉 */ }
         _queue.Dispose();
         GC.SuppressFinalize(this);
     }

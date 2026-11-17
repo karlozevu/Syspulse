@@ -294,7 +294,7 @@ public sealed class FloatingDashboardViewModel : ObservableObject
     private void OnSnapshot(SensorSnapshot snapshot)
     {
         // CPU 占用优先用 GetSystemTimes，内存用已用物理内存比例；两者都在后台线程计算好后推到 UI
-        var cpu = snapshot.CpuUsagePercent ?? WindowsNativeInfo.GetCpuUsagePercent() ?? CpuUsage;
+        var cpu = snapshot.CpuUsagePercent ?? WindowsNativeInfo.GetCpuUsagePercent("status-bar") ?? CpuUsage;
         double memory = snapshot.MemoryUsagePercent ?? 0;
         if (snapshot.MemoryUsagePercent is null)
         {

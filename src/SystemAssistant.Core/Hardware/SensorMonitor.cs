@@ -86,7 +86,7 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
             OpenComputer();
             // 预热 GetSystemTimes 基准：该方法首次调用只记录采样、返回 null，
             // 之后每个周期的差值才是真实 CPU 占用；预热后首个周期就能给出有效数值。
-            var warmup = WindowsNativeInfo.GetCpuUsagePercent();
+            var warmup = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
             if (warmup is not null) { _lastCpuUsage = warmup.Value; _hasCpuSample = true; }
             // 立即推送首个快照，不等待第一个计时周期，确保启动后很快就有数据
             CollectOnce();
@@ -216,7 +216,7 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         }
 
         // Win32 基础指标：普通权限即可读取，是快照的权威数据来源，绝不依赖 LHM
-        var cpuSample = WindowsNativeInfo.GetCpuUsagePercent();
+        var cpuSample = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
         if (cpuSample is not null) { _lastCpuUsage = cpuSample.Value; _hasCpuSample = true; }
         else if (!_hasCpuSample) { _lastCpuUsage = ReadCpuUsageFromWmi(); _hasCpuSample = true; }
         var cpuUsage = Math.Clamp(_lastCpuUsage, 0, 100);

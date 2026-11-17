@@ -46,7 +46,9 @@ public static class JsonStorage
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-            var temp = path + ".tmp";
+            // 临时文件名带 GUID / PID：多实例并发配置写入时不会互相覆盖 .tmp。
+            var temp = path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                       + "_" + Guid.NewGuid().ToString("N") + ".tmp";
             var json = JsonSerializer.Serialize(value, Options);
             File.WriteAllText(temp, json);
             File.Move(temp, path, overwrite: true);
@@ -72,18 +74,27 @@ public static class JsonStorage
         lock (Sync)
         {
             if (!File.Exists(path)) return list;
-            foreach (var line in File.ReadLines(path))
+            // File.ReadLines 是延迟枚举：文件在枚举期间被删 / 锁定会在 MoveNext 抛 IO 异常，
+            // 必须把整段枚举纳入保护，否则读取日志会让界面崩溃。
+            try
             {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                try
+                foreach (var line in File.ReadLines(path))
                 {
-                    var item = JsonSerializer.Deserialize<T>(line, Options);
-                    if (item is not null) list.Add(item);
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    try
+                    {
+                        var item = JsonSerializer.Deserialize<T>(line, Options);
+                        if (item is not null) list.Add(item);
+                    }
+                    catch (JsonException)
+                    {
+                        // 单行损坏不应影响整个日志的读取
+                    }
                 }
-                catch (JsonException)
-                {
-                    // 单行损坏不应影响整个日志的读取
-                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 枚举期间文件被外部修改 / 删除：返回已读到的部分，不抛出。
             }
         }
         return list;

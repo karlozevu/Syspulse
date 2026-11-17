@@ -99,3 +99,29 @@
 | 回归探针 | 34/34 PASS（新增 `Hardware.OsCaption + VramSource` 1 项），注册表备份项按策略 SKIP |
 
 > 曾按用户要求新增 CPU / GPU 温度仪表盘并做了三处界面接入，但本机标准权限下 CPU 核心温度传感器只返回 0 °C 占位值（WMI 热区亦拒绝访问），实际可读性不足，已按用户决定整体移除；硬件页原有的温度 / 风扇 / 电压实时曲线保留。
+
+---
+
+## 第二轮深度审计（2026-11-17，v1.1.2）
+
+在前两轮复检基础上，对 Models / Utils / Core / App 四层再做一次代码级深度审计，聚焦边界条件、异常路径、并发竞态、资源释放、数据安全与 UI 一致性。四个审计维度并行、逐文件交叉核实，确认并修复 16 项此前未覆盖的缺陷（详见 `CHANGELOG.md` 的 1.1.2 节）。
+
+**安全护栏实测**
+
+| 探针 | 结果 |
+| --- | --- |
+| `PathGuard system path` | `C:\Windows\System32\kernel32.dll` → blocked |
+| `PathGuard trailing-dot path [should reject]` | `C:\Windows.` → blocked：「路径段含尾随点或空格」，绕过面已封堵 |
+
+**数值格式化边界实测（本轮新增回归）**
+
+| 探针 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `FormatSpeed(1e30)` | `0 B/s`（long 溢出为负） | `8192.0 PB/s` |
+| `FormatBytes(2048, -1/99)` | 抛 FormatException | `2 KB` / `2.000000000000000 KB`（clamp 到 0~15） |
+| `FormatPercent(NaN/Inf)` | `NaN %` / `∞ %` | `N/A` |
+| `CpuUsage per-consumer isolation` | 多消费者共享基准 | `probe-a` / `probe-b` 各自首次均 `null`，基准隔离 |
+
+**修复方式**：所有结论均先经源码路径核实、区分真缺陷与环境限制后才修改，避免为"疑似"问题引入回归。用户已授权的深度清理（清理去重取最高风险、取消即终止整个进程树）按安全优先原则处理。
+
+**验证**：Release 编译 0 错误 0 警告；回归探针 **39/39 PASS**（由 34 项扩充）；启动冒烟 12 秒无 stderr、诊断日志为空。

@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using Avalonia.Threading;
 using SystemAssistant.App.Mvvm;
 using SystemAssistant.App.Services;
 using SystemAssistant.Core.Common;
@@ -10,6 +11,7 @@ namespace SystemAssistant.App.ViewModels;
 public sealed class LogsViewModel : ViewModelBase
 {
     private IReadOnlyList<OperationLogEntry> _entries = Array.Empty<OperationLogEntry>();
+    private bool _disposed;
 
     public LogsViewModel()
     {
@@ -34,7 +36,13 @@ public sealed class LogsViewModel : ViewModelBase
 
     public int Count => Entries.Count;
 
-    private void OnLogChanged() => Refresh();
+    // OperationLogService.Changed 可能由 Core 的后台任务线程触发，
+    // 直接刷新会在线程池线程改写 Avalonia 控件集合；必须 marshal 到 UI 线程。
+    private void OnLogChanged()
+    {
+        if (_disposed) return;
+        Dispatcher.UIThread.Post(() => { if (!_disposed) Refresh(); });
+    }
 
     private void Refresh()
     {
@@ -65,6 +73,7 @@ public sealed class LogsViewModel : ViewModelBase
 
     public override void Dispose()
     {
+        _disposed = true;
         if (Services.OperationLog is OperationLogService logService) logService.Changed -= OnLogChanged;
         base.Dispose();
     }

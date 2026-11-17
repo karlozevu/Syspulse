@@ -212,7 +212,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ## 8. Windows 安装程序（Inno Setup 6）
 
-成品：`artifacts/SystemAssistant-Setup-1.1.1.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
+成品：`artifacts/SystemAssistant-Setup-1.1.2.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
 
 ### 8.1 运行要求与安装位置
 
@@ -238,7 +238,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ```bat
 :: 完全静默安装（无界面）
-SystemAssistant-Setup-1.1.1.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+SystemAssistant-Setup-1.1.2.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /DIR="%LOCALAPPDATA%\Programs\System Assistant" /LOG="%TEMP%\sa-install.log"
 
 :: 其他常用参数

@@ -55,6 +55,14 @@ public static class PathGuard
         try
         {
             full = Path.GetFullPath(trimmed);
+            // .NET Core 3.0+ 的 GetFullPath 保留路径段末尾的点 / 空格，而 Win32 文件系统
+            // 会把 "C:\Windows." 解析为 "C:\Windows"。若校验用带点的字符串、删除用原字符串，
+            // 就可能绕过受保护目录判定误删系统目录。这里显式拒绝任何带尾随点 / 空格的段。
+            if (HasTrailingDotOrSpace(trimmed))
+            {
+                reason = "路径段含尾随点或空格，可能被 Windows 解析为其它路径，拒绝删除";
+                return false;
+            }
             // 展开 8.3 短名后再做白名单 / 受保护目录比较，防止用 PROGRA~1 之类绕过。
             full = ExpandLongPath(full);
         }
@@ -252,4 +260,25 @@ public static class PathGuard
 
     private static string Normalize(string path) =>
         string.IsNullOrEmpty(path) ? string.Empty : path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    /// <summary>
+    /// 检测路径中是否存在以点或空格结尾的段（不含 "." / ".." 这两个合法的相对段）。
+    /// Windows 文件系统在解析时会丢弃段尾的点 / 空格，导致 "C:\Windows." 实际指向
+    /// "C:\Windows"，因此这类路径必须在护栏阶段拒绝，不能进入删除 / 粉碎流程。
+    /// </summary>
+    private static bool HasTrailingDotOrSpace(string path)
+    {
+        var slashNormalized = path.Replace('/', '\\');
+        var segments = slashNormalized.Split('\\', StringSplitOptions.None);
+        foreach (var segment in segments)
+        {
+            if (segment.Length == 0) continue;
+            var last = segment[^1];
+            if (last is not ('.' or ' ')) continue;
+            // "." 与 ".." 是合法的相对路径段，单独放行
+            if (segment is "." or "..") continue;
+            return true;
+        }
+        return false;
+    }
 }

@@ -37,6 +37,15 @@ public sealed class ProcessService : IProcessService
                 _log.Log(OperationType.Process, action, $"PID {pid}", false, message);
                 return OperationResult.Fail(message, ex);
             }
+            catch (AggregateException ex)
+            {
+                // Kill(entireProcessTree: true) 在树中部分进程无法终止时会抛 AggregateException，
+                // 原 catch 链未覆盖会导致 Task faulted、操作日志缺失、界面拿不到结果。
+                var detail = string.Join("；", ex.Flatten().InnerExceptions.Select(e => e.Message));
+                var message = $"进程树中有部分进程未能结束：{detail}";
+                _log.Log(OperationType.Process, action, $"PID {pid}", false, message);
+                return OperationResult.Fail(message, ex);
+            }
             catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
             {
                 _log.Log(OperationType.Process, action, $"PID {pid}", false, ex.Message);

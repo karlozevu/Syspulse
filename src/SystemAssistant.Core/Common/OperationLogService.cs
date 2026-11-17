@@ -33,11 +33,22 @@ public sealed class OperationLogService : IOperationLogService
             Success = success,
             ErrorMessage = errorMessage
         };
+        // 日志是辅助功能：磁盘满、文件被独占、目录无写权限等持久化失败
+        // 绝不能冒泡到业务操作（如"服务已启动但日志写失败"被误判为整体失败）。
         lock (_sync)
         {
-            JsonStorage.AppendLine(_path, entry);
+            try
+            {
+                JsonStorage.AppendLine(_path, entry);
+            }
+            catch (Exception)
+            {
+                // 日志写入失败时静默降级；主业务结果不受影响。
+            }
         }
-        Changed?.Invoke();
+        // 订阅者同样不能影响业务；UI 订阅方需自行切回 UI 线程。
+        try { Changed?.Invoke(); }
+        catch (Exception) { }
     }
 
     public IReadOnlyList<OperationLogEntry> GetAll() => JsonStorage.ReadLines<OperationLogEntry>(_path);

@@ -106,9 +106,11 @@ public sealed class OverviewViewModel : ViewModelBase
         NetworkSummary = o.NetworkAdapters.Count == 0
             ? L("Common_None")
             : string.Join("；", o.NetworkAdapters.Select(n => $"{n.Name} {n.IpAddresses}"));
-        BatterySummary = o.Battery.IsPresent
-            ? $"{o.Battery.FullChargeCapacityMwh} / {o.Battery.DesignCapacityMwh} mWh · {L("Label_Wear")} {o.Battery.WearPercent:F1} % · {L("Label_Charge")} {o.Battery.ChargePercent:F1} %"
-            : L("Hardware_BatteryNone");
+        BatterySummary = !o.Battery.IsPresent
+            ? L("Hardware_BatteryNone")
+            : !o.Battery.IsFullChargeCapacityKnown
+                ? $"{L("Common_NA")} / {o.Battery.DesignCapacityMwh} mWh · {L("Label_Wear")} {L("Common_NA")} · {L("Label_Charge")} {L("Common_NA")}"
+                : $"{o.Battery.FullChargeCapacityMwh} / {o.Battery.DesignCapacityMwh} mWh · {L("Label_Wear")} {o.Battery.WearPercent:F1} % · {L("Label_Charge")} {o.Battery.ChargePercent:F1} %";
         DisplaySummary = o.Displays.Count == 0
             ? L("Common_None")
             : string.Join("；", o.Displays.Select(d => $"{d.DeviceName} {d.ResolutionText} {(d.HdrEnabled == true ? "HDR" : "")}"));

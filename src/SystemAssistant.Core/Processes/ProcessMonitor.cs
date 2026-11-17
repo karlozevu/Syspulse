@@ -33,7 +33,10 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
         {
             if (IsRunning) return;
             _cts = new CancellationTokenSource();
-            _worker = Task.Run(() => RunLoopAsync(_cts.Token));
+            // 必须先取局部 token：lambda 内再读 _cts 时，Stop() 可能已把字段置 null，
+            // 导致 NullReferenceException 或 worker 绑定到新 CTS 而取消失效。
+            var token = _cts.Token;
+            _worker = Task.Run(() => RunLoopAsync(token), token);
         }
     }
 
