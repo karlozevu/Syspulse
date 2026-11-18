@@ -1,5 +1,5 @@
 ; ============================================================================
-;  System Assistant 1.1.2 -- Inno Setup 6 installer script
+;  System Assistant 1.1.3 -- Inno Setup 6 installer script
 ;  ---------------------------------------------------------------------------
 ;  * Per-user installation: no administrator rights, no UAC prompt.
 ;    Default directory is %LOCALAPPDATA%\Programs\System Assistant ({userpf}).
@@ -13,7 +13,7 @@
 ; ============================================================================
 
 #define MyAppName      "System Assistant"
-#define MyAppVersion   "1.1.2"
+#define MyAppVersion   "1.1.3"
 #define MyAppPublisher "System Assistant Project"
 #define MyAppURL       "https://github.com/karlozevu/System-Assistant"
 #define MyAppExeName   "SystemAssistant.exe"
@@ -30,12 +30,12 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppCopyright=Copyright (C) 2026 {#MyAppPublisher}
-VersionInfoVersion=1.1.2.0
+VersionInfoVersion=1.1.3.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}
 VersionInfoProductTextVersion={#MyAppVersion}
-VersionInfoOriginalFileName=SystemAssistant-Setup-1.1.2.exe
+VersionInfoOriginalFileName=SystemAssistant-Setup-1.1.3.exe
 
 ; --- Per-user install (no UAC) --------------------------------------------
 PrivilegesRequired=lowest
@@ -57,7 +57,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; path in this script (OutputDir, MessagesFile, [Files] Source, ...).
 SourceDir=..
 OutputDir=artifacts
-OutputBaseFilename=SystemAssistant-Setup-1.1.2
+OutputBaseFilename=SystemAssistant-Setup-1.1.3
 Compression=lzma2/max
 SolidCompression=yes
 ; Custom icon: used by setup.exe itself, the wizard title bar and the taskbar.

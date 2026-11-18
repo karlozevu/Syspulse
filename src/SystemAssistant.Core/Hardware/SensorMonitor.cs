@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using LibreHardwareMonitor.Hardware;
 using SystemAssistant.Core.Interfaces;
 using SystemAssistant.Models.Hardware;
@@ -30,15 +31,42 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     private double _lastCpuUsage;
     private bool _hasCpuSample;
 
+    // CPU 占用滑动窗口：Windows 的 CPU 时间按 ~15.6ms tick 计量，250ms 短窗口会有
+    // 明显量化抖动（实测 5%~27%）。对最近 4 帧取中位数可显著降低噪声，同时保留实时性
+    // （4 帧 × 250ms = 1 秒窗口）。仅后台工作线程读写。
+    private readonly Queue<double> _cpuWindow = new();
+    private const int CpuWindowSize = 4;
+
+    // 实时监控诊断：单调递增序号、最近一次成功采集的单调时钟、采集耗时
+    private long _sequence;
+    private long _lastCollectTick;
+    private double _lastCostMs;
+
+    /// <summary>数据被视为过期的时间阈值：超过 3 个采集周期没有新快照，界面必须标注。</summary>
+    private TimeSpan StaleThreshold => TimeSpan.FromMilliseconds(Math.Max(1500, RefreshIntervalMs * 3L));
+
     public event Action<SensorSnapshot>? SnapshotUpdated;
     public event Action<ThresholdAlert>? ThresholdExceeded;
 
     public bool IsRunning => _worker is { IsCompleted: false };
 
-    public int RefreshIntervalMs { get; set; } = 2000;
+    /// <summary>实时监控刷新间隔，默认 1 秒（真实时）。下限 250ms，避免过密采样拖垮系统。</summary>
+    public int RefreshIntervalMs { get; set; } = 1000;
 
     /// <summary>最近一次采集到的全部传感器读数（只读快照，线程安全）。</summary>
     public IReadOnlyList<SensorReading> LatestReadings => Volatile.Read(ref _latest);
+
+    /// <summary>最近一次采集的诊断信息，供界面判断数据是否新鲜、是否降级。</summary>
+    public (long Sequence, double CostMs, DateTime CollectedAt, string Diagnostic) LastDiagnostic
+    {
+        get
+        {
+            var seq = Interlocked.Read(ref _sequence);
+            return (seq, Volatile.Read(ref _lastCostMs),
+                new DateTime(Interlocked.Read(ref _lastCollectTick), DateTimeKind.Utc).ToLocalTime(),
+                LastError);
+        }
+    }
 
     /// <summary>最近一次采集错误，供界面显示降级提示。</summary>
     public string LastError { get; private set; } = string.Empty;
@@ -62,6 +90,9 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         }
     }
 
+    /// <summary>实时监控间隔钳制：250ms~60s。250ms 是普通权限下 Win32/LHM 采样不失真的下限。</summary>
+    internal static int ClampInterval(int ms) => Math.Clamp(ms, 250, 60_000);
+
     public void Stop()
     {
         CancellationTokenSource? cts;
@@ -83,21 +114,31 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     {
         try
         {
-            OpenComputer();
-            // 预热 GetSystemTimes 基准：该方法首次调用只记录采样、返回 null，
-            // 之后每个周期的差值才是真实 CPU 占用；预热后首个周期就能给出有效数值。
+            // 预热 GetSystemTimes 基准：首次调用只记录采样、返回 null。
             var warmup = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
             if (warmup is not null) { _lastCpuUsage = warmup.Value; _hasCpuSample = true; }
-            // 立即推送首个快照，不等待第一个计时周期，确保启动后很快就有数据
-            CollectOnce();
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000)));
+
+            // 关键架构：LHM 初始化（Open + 首次 Update）在无管理员权限时可阻塞 2~4 秒。
+            // 把它放到独立任务里并行执行，主循环用 Win32 基础指标（CPU / 内存）持续按刷新
+            // 间隔推送实时快照；LHM 就绪后 _computer 被赋值，后续帧自动并入温度 / 风扇等读数。
+            // 这样整个初始化期间都有连续、无空窗的实时数据，而不是卡住几秒。
+            var initTask = Task.Run(() =>
+            {
+                try { OpenComputer(); }
+                catch (Exception ex) { LastError = "传感器初始化受限：" + ex.Message; }
+            }, token);
+
+            // 立即推第一帧（不等定时器），用户点「开始采集」后马上有数据
+            CollectOnce(basicOnly: true);
+
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(ClampInterval(RefreshIntervalMs)));
             while (await timer.WaitForNextTickAsync(token))
             {
-                // 用户可在设置页即时修改刷新间隔；定时器周期可以动态调整
-                CollectOnce();
-                if (Math.Abs(timer.Period.TotalMilliseconds - RefreshIntervalMs) > 1)
+                // 初始化未完成前用 basicOnly，避免读到未就绪的 LHM 造成空集合
+                CollectOnce(basicOnly: !initTask.IsCompleted);
+                if (Math.Abs(timer.Period.TotalMilliseconds - ClampInterval(RefreshIntervalMs)) > 1)
                 {
-                    timer.Period = TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000));
+                    timer.Period = TimeSpan.FromMilliseconds(ClampInterval(RefreshIntervalMs));
                 }
             }
         }
@@ -178,15 +219,21 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     /// CPU / 内存占用始终由 Win32 API 提供（普通权限可用），LHM 只负责温度 / 风扇 / 电压等附加读数。
     /// 这样实时曲线、传感器计数、阈值告警在任何权限下都能工作，不会因 LHM 初始化失败而全线空白。
     /// </summary>
-    private void CollectOnce()
+    private void CollectOnce(bool basicOnly = false)
     {
+        // 用单调时钟计量采集耗时与数据新鲜度；DateTime.Now 会受系统时间调整影响。
+        var collectStart = Stopwatch.GetTimestamp();
         Computer? computer;
-        lock (_sync) computer = _computer;
+        lock (_sync) computer = basicOnly ? null : _computer;
 
         var readings = new List<SensorReading>();
         string? degradedError = null;
 
-        if (computer is not null)
+        if (basicOnly)
+        {
+            degradedError = "正在初始化硬件传感器，当前仅显示 Win32 基础指标（CPU / 内存）";
+        }
+        else if (computer is not null)
         {
             try
             {
@@ -219,41 +266,114 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         var cpuSample = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
         if (cpuSample is not null) { _lastCpuUsage = cpuSample.Value; _hasCpuSample = true; }
         else if (!_hasCpuSample) { _lastCpuUsage = ReadCpuUsageFromWmi(); _hasCpuSample = true; }
-        var cpuUsage = Math.Clamp(_lastCpuUsage, 0, 100);
-        var memoryUsage = ReadMemoryUsagePercent();
+        // 滑动窗口中位数：抑制短窗口量化抖动，避免占用率忽高忽低。
+        _cpuWindow.Enqueue(Math.Clamp(_lastCpuUsage, 0, 100));
+        while (_cpuWindow.Count > CpuWindowSize) _cpuWindow.Dequeue();
+        var cpuUsage = Median(_cpuWindow);
+
+        // 单次 Win32 调用取到内存全部指标，保证 used / total / 百分比来自同一时刻，
+        // 避免分多次读取导致三项数据互相矛盾（准确性关键）。
+        var (memTotal, memAvailable, _, _) = WindowsNativeInfo.GetMemoryStatus();
+        var memoryUsage = memTotal > 0
+            ? Math.Clamp((1 - memAvailable * 1.0 / memTotal) * 100, 0, 100)
+            : 0;
+        var usedMemoryBytes = memTotal > 0 && memAvailable >= 0 && memAvailable <= memTotal
+            ? memTotal - memAvailable : (long?)null;
 
         // 缺少 LHM 的 CPU / 内存负载读数时补上 Win32 原生读数，
         // 保证 LatestReadings 至少有 CPU 与内存两条，且曲线标识稳定连续。
         EnsureNativeLoadReadings(readings, cpuUsage, memoryUsage);
 
+        // 异常值过滤：传感器偶发返回物理上不可能的值（负温度、超阈值读数、离谱频率），
+        // 直接展示会造成曲线炸裂与用户误判。这里按类别丢弃明显非法值。
+        var beforeFilter = readings.Count;
+        var validReadings = readings.Where(IsPhysicallyPlausible).ToList();
+        var filteredCount = beforeFilter - validReadings.Count;
+        if (filteredCount > 0)
+            degradedError = (degradedError is null ? string.Empty : degradedError + "；")
+                + $"已过滤 {filteredCount} 条异常读数";
+
+        // 从本轮已过滤的读数提取实时 CPU 温度 / 功耗 / 频率（不额外查 WMI，保证同一时刻）
+        static double? Pick(IReadOnlyList<SensorReading> rs, SensorKind kind, string namePart)
+        {
+            var hit = rs.FirstOrDefault(r => r.Kind == kind
+                && r.Name.Contains(namePart, StringComparison.OrdinalIgnoreCase));
+            return hit?.Value;
+        }
+        var cpuTemp = Pick(validReadings, SensorKind.Temperature, "Package")
+                      ?? Pick(validReadings, SensorKind.Temperature, "Core")
+                      ?? validReadings.FirstOrDefault(r => r.Kind == SensorKind.Temperature)?.Value;
+        var cpuPower = Pick(validReadings, SensorKind.Power, "Package")
+                       ?? validReadings.FirstOrDefault(r => r.Kind == SensorKind.Power)?.Value;
+        var cpuClock = validReadings.FirstOrDefault(r => r.Kind == SensorKind.Clock
+            && r.Name.Contains("CPU", StringComparison.OrdinalIgnoreCase))?.Value;
+
         var now = DateTime.Now;
-        foreach (var reading in readings) reading.Timestamp = now;
+        foreach (var reading in validReadings) reading.Timestamp = now;
         // LatestReadings 与事件载荷共用同一份数组快照：早先直接暴露可变 List，
         // 界面在 Stop/Dispose 之后可能读到空集合，导致 CPU 温度等派生字段恒为 N/A。
-        var snapshotReadings = readings.ToArray();
+        var snapshotReadings = validReadings.ToArray();
         Volatile.Write(ref _latest, snapshotReadings);
         History.Add(snapshotReadings);
 
         // 失败原因只记录、不阻断快照推送
         LastError = degradedError ?? string.Empty;
 
+        var costTicks = Stopwatch.GetTimestamp() - collectStart;
+        double costMs = costTicks * (1000.0 / Stopwatch.Frequency);
+        Volatile.Write(ref _lastCostMs, costMs);
+        Interlocked.Exchange(ref _lastCollectTick, DateTime.UtcNow.Ticks);
+        var sequence = Interlocked.Increment(ref _sequence);
+
         var snapshot = new SensorSnapshot
         {
             Timestamp = now,
             Readings = snapshotReadings,
             CpuUsagePercent = cpuUsage,
-            MemoryUsagePercent = memoryUsage
+            MemoryUsagePercent = memoryUsage,
+            CpuTemperature = cpuTemp,
+            CpuPower = cpuPower,
+            CpuClockMhz = cpuClock,
+            UsedMemoryBytes = usedMemoryBytes,
+            TotalMemoryBytes = memTotal > 0 ? memTotal : null,
+            Sequence = sequence,
+            CollectionCostMs = costMs,
+            Diagnostic = LastError,
+            // 采集耗时超过设定间隔说明采样跟不上，标记让界面提示用户调大间隔。
+            // 首帧（Sequence==1）是冷启动 JIT 开销，已有"正在初始化"诊断，不标过期。
+            IsStale = sequence > 1 && costMs > ClampInterval(RefreshIntervalMs)
         };
         RaiseSnapshotUpdated(snapshot);
-        CheckThresholds(readings, now);
+        CheckThresholds(validReadings, now);
     }
 
-    /// <summary>由 GlobalMemoryStatusEx 计算物理内存占用百分比（0~100）。</summary>
-    private static double ReadMemoryUsagePercent()
+    /// <summary>取序列中位数：比平均值更能抵抗偶发尖峰，用于平滑 CPU 量化抖动。</summary>
+    private static double Median(IEnumerable<double> values)
     {
-        var (totalPhys, availablePhys, _, _) = WindowsNativeInfo.GetMemoryStatus();
-        if (totalPhys <= 0) return 0;
-        return Math.Clamp((1 - availablePhys * 1.0 / totalPhys) * 100, 0, 100);
+        var sorted = values.OrderBy(v => v).ToArray();
+        if (sorted.Length == 0) return 0;
+        var mid = sorted.Length / 2;
+        return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0;
+    }
+
+    /// <summary>
+    /// 物理合理性校验：丢掉传感器偶发的越界读数（负绝对温度、超过 300°C、
+    /// 占用率超出 0~100、负频率 / 负风扇转速等），保证曲线与展示不被异常值污染。
+    /// </summary>
+    private static bool IsPhysicallyPlausible(SensorReading r)
+    {
+        var v = r.Value;
+        if (double.IsNaN(v) || double.IsInfinity(v)) return false;
+        return r.Kind switch
+        {
+            SensorKind.Temperature => v >= -60 && v <= 300,
+            SensorKind.Load => v >= 0 && v <= 100,
+            SensorKind.Clock => v >= 0 && v <= 20_000,
+            SensorKind.Fan => v >= 0 && v <= 30_000,
+            SensorKind.Voltage => v >= 0 && v <= 100,
+            SensorKind.Power => v >= 0 && v <= 2000,
+            _ => true
+        };
     }
 
     /// <summary>

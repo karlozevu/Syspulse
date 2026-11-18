@@ -47,6 +47,7 @@ public sealed class HardwareViewModel : ViewModelBase
     private string _sensorCount = "0";
     private bool _isMonitoring;
     private SystemOverview? _overview;
+    private string _realtimeStatus = string.Empty;
 
     public HardwareViewModel()
     {
@@ -90,6 +91,9 @@ public sealed class HardwareViewModel : ViewModelBase
     public bool BatteryPresent { get => _batteryPresent; private set => Set(ref _batteryPresent, value); }
     public string DisplayList { get => _displayList; private set => Set(ref _displayList, value); }
     public string SensorCount { get => _sensorCount; private set => Set(ref _sensorCount, value); }
+
+    /// <summary>数据新鲜度状态：实时 / 采集延迟 / 已过期，实时告知用户当前读数是否可信。</summary>
+    public string RealtimeStatus { get => _realtimeStatus; private set => Set(ref _realtimeStatus, value); }
 
     public bool IsMonitoring
     {
@@ -180,6 +184,24 @@ public sealed class HardwareViewModel : ViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             SensorCount = count.ToString();
+
+            // 数据新鲜度：过期（采集停止 / 卡顿）优先提示；否则显示采集耗时与周期
+            RealtimeStatus = !Services.Sensors.IsRunning || snapshot.IsStale
+                ? L("Hardware_RealtimeStale")
+                : LF("Hardware_RealtimeLag", snapshot.CollectionCostMs.ToString("F0"),
+                    Services.Sensors.RefreshIntervalMs.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            // 动态指标用同一采集窗口的快照实时刷新，不再依赖打开页面时的一次性 WMI 查询。
+            // 这样 CPU / 内存读数与实时曲线严格同源、同一时刻，避免数据自相矛盾。
+            CpuUsage = $"{snapshot.CpuUsagePercent:F1} %";
+            MemUsed = snapshot.UsedMemoryBytes is { } used && snapshot.TotalMemoryBytes is { } total
+                ? $"{FormatHelper.FormatBytes(used)} ({snapshot.MemoryUsagePercent:F1} %)"
+                : $"{snapshot.MemoryUsagePercent:F1} %";
+            if (snapshot.TotalMemoryBytes is { } totalMem) MemTotal = FormatHelper.FormatBytes(totalMem);
+            if (snapshot.CpuTemperature is { } temp) CpuTemp = $"{temp:F1} °C";
+            if (snapshot.CpuPower is { } power) CpuPower = $"{power:F1} W";
+            if (snapshot.CpuClockMhz is { } clock) CpuClock = $"{clock:F0} MHz";
+
             var history = Services.SensorMonitor.History;
             // 优先展示温度、风扇、电压三类曲线，最多 6 条，避免图表过多影响流畅度
             var preferred = snapshot.Readings

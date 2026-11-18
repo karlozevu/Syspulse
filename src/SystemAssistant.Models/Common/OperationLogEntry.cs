@@ -46,7 +46,7 @@ public sealed class OperationResult
 /// <summary>应用版本信息。</summary>
 public sealed class AppVersionInfo
 {
-    public string CurrentVersion { get; init; } = "1.1.2";
+    public string CurrentVersion { get; init; } = "1.1.3";
     public string LatestVersion { get; init; } = string.Empty;
     public bool HasUpdate { get; init; }
     public string ReleaseNotes { get; init; } = string.Empty;

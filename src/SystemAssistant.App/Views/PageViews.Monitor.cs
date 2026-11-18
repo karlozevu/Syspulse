@@ -135,6 +135,8 @@ public static partial class PageViewLocator
                 UiFactory.BoundText(vm, nameof(HardwareViewModel.SensorCount))
             }
         });
+        // 数据新鲜度：实时 / 采集延迟 / 过期，让用户随时知道屏幕上的读数是否可信
+        sensors.Children.Add(UiFactory.BoundText(vm, nameof(HardwareViewModel.RealtimeStatus)));
         sensors.Children.Add(chartsPanel);
 
         var battery = new StackPanel();

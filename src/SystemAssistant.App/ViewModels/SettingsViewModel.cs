@@ -49,7 +49,7 @@ public sealed class SettingsViewModel : ViewModelBase
 
     public int ThemeIndex { get => _themeIndex; set => Set(ref _themeIndex, Math.Clamp(value, 0, 2)); }
     public int LanguageIndex { get => _languageIndex; set => Set(ref _languageIndex, Math.Clamp(value, 0, 1)); }
-    public int RefreshIntervalMs { get => _refreshIntervalMs; set => Set(ref _refreshIntervalMs, Math.Clamp(value, 500, 60_000)); }
+    public int RefreshIntervalMs { get => _refreshIntervalMs; set => Set(ref _refreshIntervalMs, Math.Clamp(value, 250, 60_000)); }
     public double TemperatureThreshold { get => _temperatureThreshold; set => Set(ref _temperatureThreshold, Math.Clamp(value, 30, 120)); }
     public string ExportPath { get => _exportPath; set => Set(ref _exportPath, value); }
     public string BackupPath { get => _backupPath; set => Set(ref _backupPath, value); }

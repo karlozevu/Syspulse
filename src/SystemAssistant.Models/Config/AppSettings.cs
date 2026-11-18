@@ -26,7 +26,8 @@ public sealed class AppSettings
     public int Version { get; set; } = 1;
 
     /// <summary>传感器刷新间隔（毫秒），限制在 500~60000。</summary>
-    public int RefreshIntervalMs { get; set; } = 2000;
+    /// <summary>实时监控刷新间隔，默认 1 秒。下限 250ms（真实时）。</summary>
+    public int RefreshIntervalMs { get; set; } = 1000;
 
     public ThemeMode Theme { get; set; } = ThemeMode.System;
     public LanguageMode Language { get; set; } = LanguageMode.ZhCn;
@@ -51,5 +52,5 @@ public sealed class AppSettings
 
     public bool ConfirmHighRiskOperations { get; set; } = true;
 
-    public int ClampRefreshInterval() => Math.Clamp(RefreshIntervalMs, 500, 60_000);
+    public int ClampRefreshInterval() => Math.Clamp(RefreshIntervalMs, 250, 60_000);
 }

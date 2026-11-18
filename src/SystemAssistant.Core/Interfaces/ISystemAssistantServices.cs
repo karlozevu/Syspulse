@@ -56,6 +56,9 @@ public interface ISensorMonitor
     int RefreshIntervalMs { get; set; }
     IReadOnlyList<SensorReading> LatestReadings { get; }
 
+    /// <summary>最近一次采集的序号、耗时、时间与诊断，用于判断数据新鲜度。</summary>
+    (long Sequence, double CostMs, DateTime CollectedAt, string Diagnostic) LastDiagnostic { get; }
+
     void Start();
     void Stop();
     void SetThresholds(IReadOnlyList<SensorThreshold> thresholds);

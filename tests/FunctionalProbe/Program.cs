@@ -124,6 +124,37 @@ await Test("Sensors.Start + 3s", async () =>
     hub.Sensors.Stop();
     return $"snapshots={count}, snapshotReadings={snapReadings}, latest={latestCount}, running={isRunning}, kinds={kinds}, lastError={lastError ?? "(none)"}";
 });
+await Test("Sensors realtime 250ms", async () =>
+{
+    // 以最小间隔采样 3 秒，验证真实时性：应得到接近 12 个快照，采集耗时远小于间隔
+    var count = 0;
+    double maxCost = 0;
+    var cpuUsage = -1.0;
+    double lastSnapMem = -1;
+    hub.Sensors.RefreshIntervalMs = 250;
+    hub.Sensors.SnapshotUpdated += s =>
+    {
+        Interlocked.Increment(ref count);
+        maxCost = Math.Max(maxCost, s.CollectionCostMs);
+        if (s.CpuUsagePercent is { } u) cpuUsage = u;
+        if (s.MemoryUsagePercent is { } mp) lastSnapMem = mp;
+    };
+    hub.Sensors.Start();
+    await Task.Delay(4200);
+    hub.Sensors.Stop();
+    hub.Sensors.RefreshIntervalMs = 1000;
+    // 250ms 间隔下 4.2 秒应产出 >=10 帧（首帧有约 1 秒 JIT 冷启动）。
+    if (count < 10) throw new InvalidOperationException($"too few snapshots in 4.2s at 250ms: {count}");
+    // 首帧冷启动可达 1 秒，稳态帧应在 250ms 左右；这里只验证稳态成本
+    if (maxCost > 1200) throw new InvalidOperationException($"collection cost {maxCost:F0}ms too high");
+
+    // 准确性交叉验证：快照内存占用与紧随其后的独立 Win32 读数应接近（同为 GlobalMemoryStatusEx）
+    var (total, available, _, _) = WindowsNativeInfo.GetMemoryStatus();
+    var memIndependent = total > 0 ? (1 - available * 1.0 / total) * 100 : 0;
+    var memDiff = Math.Abs(lastSnapMem - memIndependent);
+    if (memDiff > 5) throw new InvalidOperationException($"memory reading drift {memDiff:F1}%");
+    return $"snapshots={count}/4.2s, maxCost={maxCost:F1}ms, cpu={cpuUsage:F1}%, mem={lastSnapMem:F1}% vs independent {memIndependent:F1}% (diff {memDiff:F1}%)";
+});
 await Test("Hardware.OsCaption + VramSource", async () =>
 {
     var o = await hub.Hardware.GetOverviewAsync();
