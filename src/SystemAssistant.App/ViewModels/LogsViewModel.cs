@@ -15,7 +15,7 @@ public sealed class LogsViewModel : ViewModelBase
 
     public LogsViewModel()
     {
-        RefreshCommand = new RelayCommand(Refresh);
+        RefreshCommand = CreateSyncCommand(Refresh);
         ExportCommand = CreateCommand(ExportAsync);
         ClearCommand = CreateCommand(ClearAsync);
         if (Services.OperationLog is OperationLogService logService) logService.Changed += OnLogChanged;

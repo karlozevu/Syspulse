@@ -46,6 +46,17 @@ public sealed class MainWindowViewModel : ViewModelBase
     private volatile bool _alertShowing;
     private DateTime _lastAlertUtc = DateTime.MinValue;
 
+    /// <summary>创建把异常写进 GlobalStatus 的同步命令（主窗口状态栏专用）。</summary>
+    private RelayCommand MainCommand(Action execute) => new(execute)
+    {
+        ErrorHandler = ex => GlobalStatus = L("Message_ErrorPrefix") + ex.Message
+    };
+
+    private RelayCommand MainCommand(Action<object?> execute) => new(execute)
+    {
+        ErrorHandler = ex => GlobalStatus = L("Message_ErrorPrefix") + ex.Message
+    };
+
     public MainWindowViewModel()
     {
         var settings = Services.Settings.Current;
@@ -76,11 +87,14 @@ public sealed class MainWindowViewModel : ViewModelBase
             new NavigationItem { Kind = PageKind.Logs, Icon = "▩", LabelKey = "Nav_Logs", Group = "Nav_Group_System" }
         };
 
-        NavigateCommand = new RelayCommand(p =>
+        // 主窗口状态栏绑定的是 GlobalStatus 而非基类 StatusMessage，
+        // 因此这里的同步命令必须单独注入写 GlobalStatus 的异常处理器，
+        // 否则命令异常对用户完全不可见。
+        NavigateCommand = MainCommand(p =>
         {
             if (p is NavigationItem item) Navigate(item.Kind);
         });
-        ElevateCommand = new RelayCommand(() =>
+        ElevateCommand = MainCommand(() =>
         {
             if (PrivilegeHelper.IsAdministrator) return;
             // 状态栏绑定的是 GlobalStatus，写 StatusMessage 用户永远看不到。
@@ -96,7 +110,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             else
                 Environment.Exit(0);
         });
-        OpenDashboardCommand = new RelayCommand(() =>
+        OpenDashboardCommand = MainCommand(() =>
         {
             var dashboard = FloatingDashboardWindow.Current;
             if (dashboard is null) new FloatingDashboardWindow().Show();

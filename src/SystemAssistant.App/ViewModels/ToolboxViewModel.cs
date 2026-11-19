@@ -39,13 +39,13 @@ public sealed class ToolboxViewModel : ViewModelBase
         FindLargeCommand = CreateCommand(FindLargeAsync);
         FindDuplicatesCommand = CreateCommand(FindDuplicatesAsync);
         DeleteSelectedCommand = CreateCommand(async p => await DeleteSelectedAsync(p as string ?? "large"));
-        OpenFolderCommand = new RelayCommand(p =>
+        OpenFolderCommand = CreateSyncCommand(p =>
         {
             if (p is FileEntry entry) FileSystemHelper.OpenInExplorer(entry.FullPath);
             else if (p is DuplicateRow row) FileSystemHelper.OpenInExplorer(row.File.FullPath);
             else if (p is string path) FileSystemHelper.OpenInExplorer(path);
         });
-        ShortcutCommand = new RelayCommand(p =>
+        ShortcutCommand = CreateSyncCommand(p =>
         {
             if (p is string tool && !ShellHelper.OpenSystemTool(tool))
                 StatusMessage = L("Status_OpenToolFailed");

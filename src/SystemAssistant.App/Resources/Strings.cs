@@ -311,7 +311,18 @@ internal static class Strings
         ["Status_OpenToolFailed"] = "无法打开该系统工具（可能未安装或权限不足）",
         ["Hardware_GpuVramNote"] = "（来自 WMI 的 32 位字段，可能受 4 GB 上限限制，仅供参考）",
         ["Hardware_SensorFallback"] = "硬件传感器驱动不可用，已改用系统 API 显示 CPU / 内存占用",
-        ["Hardware_ThresholdHint"] = "阈值在设置页配置（目前仅温度）"
+        ["Hardware_ThresholdHint"] = "阈值在设置页配置（目前仅温度）",
+        ["LogType_Clean"] = "清理",
+        ["LogType_Registry"] = "注册表",
+        ["LogType_Service"] = "服务",
+        ["LogType_Startup"] = "启动项",
+        ["LogType_SystemTuning"] = "系统调优",
+        ["LogType_SystemCommand"] = "系统命令",
+        ["LogType_Process"] = "进程",
+        ["LogType_File"] = "文件",
+        ["LogType_Settings"] = "设置",
+        ["LogType_Security"] = "安全",
+        ["Common_FileTypeSuffix"] = " 文件"
     };
 
     public static IReadOnlyDictionary<string, string> EnUs { get; } = new Dictionary<string, string>
@@ -619,6 +630,17 @@ internal static class Strings
         ["Status_OpenToolFailed"] = "Could not open the system tool (not installed or insufficient rights)",
         ["Hardware_GpuVramNote"] = "(32-bit WMI field; may be capped at 4 GB, for reference only)",
         ["Hardware_SensorFallback"] = "Hardware sensor driver unavailable; CPU / memory usage shown via system APIs",
-        ["Hardware_ThresholdHint"] = "Thresholds are configured in Settings (temperature only for now)"
+        ["Hardware_ThresholdHint"] = "Thresholds are configured in Settings (temperature only for now)",
+        ["LogType_Clean"] = "Cleanup",
+        ["LogType_Registry"] = "Registry",
+        ["LogType_Service"] = "Service",
+        ["LogType_Startup"] = "Startup",
+        ["LogType_SystemTuning"] = "System tuning",
+        ["LogType_SystemCommand"] = "System command",
+        ["LogType_Process"] = "Process",
+        ["LogType_File"] = "File",
+        ["LogType_Settings"] = "Settings",
+        ["LogType_Security"] = "Security",
+        ["Common_FileTypeSuffix"] = " files"
     };
 }

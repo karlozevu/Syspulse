@@ -42,8 +42,8 @@ public sealed class CleanerViewModel : ViewModelBase
         BackupRegistryCommand = CreateCommand(BackupRegistryAsync, () => !IsBusy);
         AddCustomPathCommand = CreateCommand(AddCustomPathAsync);
         SaveWhitelistCommand = CreateSyncCommand(SaveWhitelist);
-        SelectAllCommand = new RelayCommand(() => SetAll(true));
-        SelectNoneCommand = new RelayCommand(() => SetAll(false));
+        SelectAllCommand = CreateSyncCommand(() => SetAll(true));
+        SelectNoneCommand = CreateSyncCommand(() => SetAll(false));
 
         // 设置页与清理页共享同一份配置，任一处保存后都刷新本页文本，避免后保存的覆盖先保存的。
         Services.Settings.Changed += OnSettingsChanged;

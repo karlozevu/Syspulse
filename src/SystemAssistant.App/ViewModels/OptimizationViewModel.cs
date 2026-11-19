@@ -47,12 +47,12 @@ public sealed class OptimizationViewModel : ViewModelBase
         ResetTcpIpCommand = CreateCommand(ResetTcpIpAsync);
         PingCommand = CreateCommand(PingAsync);
         ToggleTuningCommand = CreateCommand(async p => await ToggleTuningAsync(p));
-        OpenVirtualMemoryCommand = new RelayCommand(() =>
+        OpenVirtualMemoryCommand = CreateSyncCommand(() =>
         {
             if (!ShellHelper.OpenSystemTool("virtualmemory"))
                 StatusMessage = L("Status_OpenToolFailed");
         });
-        RefreshTuningCommand = new RelayCommand(LoadTuning);
+        RefreshTuningCommand = CreateSyncCommand(LoadTuning);
 
         LoadTuning();
         Services.Repair.OutputReceived += OnCommandOutput;

@@ -300,7 +300,11 @@ public sealed class CleanService : ICleanService
         }
         catch
         {
-            return false;
+            // 保守原则：进程枚举失败（权限不足 / 系统异常）时无法确认浏览器是否已关闭，
+            // 必须假设"仍在运行"以阻止缓存清理。此前返回 false 会误判为安全而放行，
+            // 可能在浏览器占用文件时清理失败或造成数据不一致。
+            // 与 RegistryBackupHelper.KeyExists() 失败返回 true 的保守策略保持一致。
+            return true;
         }
     }
 

@@ -79,7 +79,8 @@ public static class DialogService
             SuggestedFileName = suggestedFileName,
             FileTypeChoices = new[]
             {
-                new FilePickerFileType(clean.ToUpperInvariant() + " 文件")
+                new FilePickerFileType(clean.ToUpperInvariant()
+                    + LocalizationService.Instance.Get("Common_FileTypeSuffix"))
                 {
                     Patterns = new[] { "*." + clean }
                 }

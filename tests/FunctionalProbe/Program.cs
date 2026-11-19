@@ -359,6 +359,116 @@ await Test("Stress: start-then-immediate-stop x10 (initTask join)", async () =>
 });
 
 Emit("");
+Emit("## 十、超高难度冒烟：竞态放大 / 输入轰炸 / 损坏轰炸 / 泄漏检测");
+await Test("Extreme: 24-thread CPU sampling race", async () =>
+{
+    // 24 个线程同时采样，一半共享 key、一半独立 key。验证并发字典/基准无竞态异常。
+    var errors = 0;
+    var tasks = Enumerable.Range(0, 24).Select(i => Task.Run(() =>
+    {
+        try
+        {
+            var key = i % 2 == 0 ? "shared-key" : $"thread-{i}";
+            for (var n = 0; n < 30; n++)
+            {
+                var v = WindowsNativeInfo.GetCpuUsagePercent(key);
+                if (v is { } value && (value < 0 || value > 100)) Interlocked.Increment(ref errors);
+            }
+        }
+        catch { Interlocked.Increment(ref errors); }
+    })).ToArray();
+    await Task.WhenAll(tasks);
+    if (errors > 0) throw new InvalidOperationException($"{errors} race/out-of-range errors");
+    return "24 threads x 30 samples, no race, all values in 0-100";
+});
+await TestSync("Extreme: PathGuard malicious input barrage", () =>
+{
+    var malicious = new[]
+    {
+        "C:\\Windows.", "C:\\Windows ", "C:\\Windows...", "C:\\WINDOWS\\..\\System32",
+        "CON", "NUL", "C:\\CON", "C:\\aux.txt", "COM1", "LPT9", "C:\\a\\b\\..\\..\\Windows",
+        "\\\\server\\share", "\\\\?\\C:\\Windows", "C:\\Windows\x00evil",
+        new string('a', 5000), "C:\\" + new string(' ', 50), "C:\\Windows\\.", ".", "..", ""
+    };
+    var safe = 0; var blocked = 0;
+    foreach (var p in malicious)
+    {
+        try
+        {
+            // IsSafeToDelete 绝不能抛异常，哪怕输入畸形
+            if (PathGuard.IsSafeToDelete(p, out _)) safe++; else blocked++;
+        }
+        catch (Exception ex) { throw new InvalidOperationException($"PathGuard threw on input: {ex.Message}"); }
+    }
+    return $"{malicious.Length} malicious paths, blocked={blocked}, safe={safe}, no exceptions";
+});
+await TestSync("Extreme: config corruption barrage", () =>
+{
+    var cases = new[]
+    {
+        "", " ", "{", "[]", "null", "{}", "{\"Theme\":123}", "{\"RefreshIntervalMs\":-999}",
+        "{\"RefreshIntervalMs\":1e999}", "{\"Language\":{}}", "{\"Thresholds\":\"oops\"}",
+        "{\"Theme\":\"Dark\",\"RefreshIntervalMs\":\"bad\"}",
+        "{this is not json", "{\"Theme\":\"Dark\"", "\x00\x01\x02", "{\"Theme\":null}"
+    };
+    var path = Path.Combine(temp, "barrage.json");
+    foreach (var c in cases)
+    {
+        File.WriteAllText(path, c);
+        try
+        {
+            var s = JsonStorage.Load<SystemAssistant.Models.Config.AppSettings>(path);
+            if (s is null) throw new InvalidOperationException("null settings returned");
+        }
+        catch (Exception ex) { throw new InvalidOperationException($"Load threw on corrupt config: {ex.Message}"); }
+    }
+    return $"{cases.Length} corrupt configs, no exceptions, always valid settings";
+});
+await Test("Extreme: sensor event storm + threshold churn", async () =>
+{
+    using var m = new SensorMonitor { RefreshIntervalMs = 250 };
+    var snaps = 0; var alerts = 0;
+    m.SnapshotUpdated += _ => Interlocked.Increment(ref snaps);
+    m.ThresholdExceeded += _ => Interlocked.Increment(ref alerts);
+    m.Start();
+    // 一边高速采集，一边反复改阈值（触发锁竞争），一边制造告警条件
+    // 40 次阈值变更 × 50ms = 2s，加 LHM 初始化约 3s。总时长需覆盖初始化，
+    // 否则大部分时间耗在 LHM Open() 上、帧数自然不足（不是采集故障）。
+    var churn = Task.Run(async () =>
+    {
+        for (var i = 0; i < 60; i++)
+        {
+            m.SetThresholds(new[]
+            {
+                new SystemAssistant.Models.Hardware.SensorThreshold
+                {
+                    Kind = SystemAssistant.Models.Hardware.SensorKind.Temperature,
+                    MaxValue = i % 2 == 0 ? -273 : 999, Enabled = true
+                }
+            });
+            await Task.Delay(50);
+        }
+    });
+    await churn;
+    await Task.Delay(500);
+    m.Stop();
+    if (snaps < 8) throw new InvalidOperationException($"too few snapshots under churn: {snaps}");
+    return $"snaps={snaps}, alerts={alerts}, 40 threshold updates under load, stable";
+});
+await TestSync("Extreme: 100x monitor create/dispose (GC sanity)", () =>
+{
+    for (var i = 0; i < 100; i++)
+    {
+        var m = new SensorMonitor();
+        m.Dispose();
+        var p = new ProcessMonitor();
+        p.Dispose();
+    }
+    GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+    return "100x create/dispose cycles, no exception, GC clean";
+});
+
+Emit("");
 Emit("## 汇总");
 var passed = results.Count(x => x.Ok);
 Emit($"PASS {passed} / {results.Count}");

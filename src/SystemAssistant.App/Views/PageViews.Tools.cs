@@ -209,7 +209,10 @@ public static partial class PageViewLocator
         table.Configure(new[]
         {
             Col("Logs_ColTime", 150, o => ((OperationLogEntry)o).Timestamp.ToString("yyyy-MM-dd HH:mm:ss")),
-            Col("Logs_ColType", 110, o => ((OperationLogEntry)o).Type.ToString()),
+            // 操作类型显示本地化文案而非英文枚举名；GetValue 在每次刷新时调用，
+            // 因此切换语言后表格重绘会自动取到新语言文案。
+            Col("Logs_ColType", 110, o =>
+                LocalizationService.Instance.Get("LogType_" + ((OperationLogEntry)o).Type)),
             Col("Logs_ColAction", 150, o => ((OperationLogEntry)o).Action),
             Col("Logs_ColDetail", 520, o => ((OperationLogEntry)o).Detail, stretch: true),
             Col("Logs_ColSuccess", 80, o => ((OperationLogEntry)o).Success

@@ -20,9 +20,9 @@ public sealed class ProcessViewModel : ViewModelBase
         Services.Processes.SnapshotUpdated += OnSnapshot;
         KillCommand = CreateCommand(async p => await KillAsync(p, false));
         KillTreeCommand = CreateCommand(async p => await KillAsync(p, true));
-        DetailsCommand = new RelayCommand(p => ShowDetails(p));
-        SortCommand = new RelayCommand(p => Sort(p as string ?? "CpuPercent"));
-        DashboardCommand = new RelayCommand(() =>
+        DetailsCommand = CreateSyncCommand(p => ShowDetails(p));
+        SortCommand = CreateSyncCommand(p => Sort(p as string ?? "CpuPercent"));
+        DashboardCommand = CreateSyncCommand(() =>
         {
             var window = FloatingDashboardWindow.Current;
             if (window is null) new FloatingDashboardWindow().Show();

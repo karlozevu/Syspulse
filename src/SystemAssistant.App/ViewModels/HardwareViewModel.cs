@@ -52,7 +52,7 @@ public sealed class HardwareViewModel : ViewModelBase
     public HardwareViewModel()
     {
         RefreshCommand = CreateCommand(LoadAsync);
-        ToggleSensorCommand = new RelayCommand(ToggleSensor);
+        ToggleSensorCommand = CreateSyncCommand(ToggleSensor);
         Services.Sensors.SnapshotUpdated += OnSnapshot;
         _isMonitoring = Services.Sensors.IsRunning;
         _ = LoadAsync();

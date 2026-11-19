@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using SystemAssistant.Utils.Common;
 
 namespace SystemAssistant.App.Mvvm;
 
@@ -7,6 +8,23 @@ public sealed class RelayCommand : ICommand
 {
     private readonly Action<object?> _execute;
     private readonly Func<object?, bool>? _canExecute;
+
+    /// <summary>
+    /// 未注入 ErrorHandler 时的兜底：写诊断日志而不是重新抛出。
+    /// 之前 `else throw` 会把同步命令异常抛给 Avalonia 命令框架，轻则无中文提示、
+    /// 重则触发 UnhandledException 导致整个应用退出。控件层（UiFactory/TableView）
+    /// 的命令没有 ViewModel 上下文，无法写状态栏，但绝不能因此崩溃应用。
+    /// </summary>
+    private static void LogUnhandled(Exception ex)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(
+                AppPaths.DiagnosticsLogFile,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [RelayCommand] {ex}{Environment.NewLine}");
+        }
+        catch { /* 诊断日志写失败不能再次抛异常 */ }
+    }
 
     public RelayCommand(Action execute, Func<bool>? canExecute = null)
         : this(_ => execute(), canExecute is null ? null : _ => canExecute()) { }
@@ -35,7 +53,7 @@ public sealed class RelayCommand : ICommand
         catch (Exception ex)
         {
             if (ErrorHandler is not null) ErrorHandler(ex);
-            else throw;
+            else LogUnhandled(ex);
         }
     }
 

@@ -59,6 +59,13 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
             ErrorHandler = ex => StatusMessage = L("Message_ErrorPrefix") + ex.Message
         };
 
+    /// <summary>带参数的同步命令版本，异常同样写入状态栏。</summary>
+    protected RelayCommand CreateSyncCommand(Action<object?> execute, Func<object?, bool>? canExecute = null)
+        => new(execute, canExecute)
+        {
+            ErrorHandler = ex => StatusMessage = L("Message_ErrorPrefix") + ex.Message
+        };
+
     /// <summary>把异步命令的异常写入状态栏，由基类统一构造命令时调用。</summary>
     protected AsyncRelayCommand CreateCommand(Func<Task> execute, Func<bool>? canExecute = null)
     {

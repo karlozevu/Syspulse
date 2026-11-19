@@ -28,16 +28,40 @@ public sealed class FileLoggerProvider : ILoggerProvider
         catch (InvalidOperationException) { /* 已停止写入 */ }
     }
 
+    private int _writeFailures;
+
     private void WriteLoop()
     {
         var dir = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            try { Directory.CreateDirectory(dir); } catch (IOException) { }
+        }
         foreach (var line in _queue.GetConsumingEnumerable())
         {
-            try { File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8); }
-            catch (IOException) { }
+            try
+            {
+                File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 全局异常兜底依赖此日志：主路径失败（占用/磁盘满/权限）时写备用文件，
+                // 避免"记录器失效导致异常治理整体失效"。备用也失败才彻底放弃（不能让日志线程崩溃）。
+                Interlocked.Increment(ref _writeFailures);
+                try
+                {
+                    var fallback = _path + ".bak";
+                    File.AppendAllText(fallback,
+                        line + Environment.NewLine + $"[logger] primary failed: {ex.Message}" + Environment.NewLine,
+                        Encoding.UTF8);
+                }
+                catch { /* 备用也失败：无能为力，但不能崩掉采集线程 */ }
+            }
         }
     }
+
+    /// <summary>主日志写入失败次数（供诊断：>0 说明日志降级到 .bak）。</summary>
+    public int WriteFailures => Volatile.Read(ref _writeFailures);
 
     public void Dispose()
     {
