@@ -193,7 +193,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         if (_alertShowing || (DateTime.UtcNow - _lastAlertUtc).TotalSeconds < 60) return;
         _alertShowing = true;
         _lastAlertUtc = DateTime.UtcNow;
-        Dispatcher.UIThread.Post(async () =>
+        PostUI(async () =>
         {
             try
             {
@@ -261,6 +261,7 @@ public sealed class FloatingDashboardViewModel : ObservableObject
     private double _memoryUsage;
     private string _cpuText = "0.0 %";
     private string _memoryText = "0.0 %";
+    private bool _disposed;
 
     public FloatingDashboardViewModel()
     {
@@ -301,8 +302,10 @@ public sealed class FloatingDashboardViewModel : ObservableObject
             var (total, available, _, _) = WindowsNativeInfo.GetMemoryStatus();
             if (total > 0) memory = (total - available) * 100.0 / total;
         }
-        Dispatcher.UIThread.Post(() =>
+        // 悬浮窗关闭后 Detach 已解绑事件，但已入队的回调仍可能执行，必须守卫
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            if (_disposed) return;
             CpuUsage = cpu;
             MemoryUsage = memory;
             CpuText = $"{CpuUsage:F1} %";
@@ -310,5 +313,9 @@ public sealed class FloatingDashboardViewModel : ObservableObject
         });
     }
 
-    public void Detach() => ServiceHub.Instance.Sensors.SnapshotUpdated -= OnSnapshot;
+    public void Detach()
+    {
+        _disposed = true;
+        ServiceHub.Instance.Sensors.SnapshotUpdated -= OnSnapshot;
+    }
 }

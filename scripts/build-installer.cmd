@@ -2,7 +2,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 
 rem ==========================================================================
-rem  Build SystemAssistant-Setup-1.1.3.exe with Inno Setup 6 (ISCC.exe).
+rem  Build SystemAssistant-Setup-1.1.4.exe with Inno Setup 6 (ISCC.exe).
 rem  Toolchain is kept portable inside the workspace at .tools\inno\.
 rem ==========================================================================
 
@@ -12,7 +12,7 @@ for %%I in ("%SCRIPT_DIR%..\..")  do set "WS_DIR=%%~fI"
 
 set "ISS=%PROJ_DIR%\installer\SystemAssistant-Setup.iss"
 set "SRC=%PROJ_DIR%\artifacts\win-x64-self-contained\SystemAssistant.exe"
-set "OUT=%PROJ_DIR%\artifacts\SystemAssistant-Setup-1.1.3.exe"
+set "OUT=%PROJ_DIR%\artifacts\SystemAssistant-Setup-1.1.4.exe"
 
 echo [1/4] Locating Inno Setup compiler (ISCC.exe) ...
 set "ISCC=%WS_DIR%\.tools\inno\ISCC.exe"
@@ -58,5 +58,5 @@ if not exist "%OUT%" (
 )
 for %%F in ("%OUT%") do echo       Output: %%~fF
 for %%F in ("%OUT%") do echo       Size:   %%~zF bytes
-echo [OK] Build complete: SystemAssistant-Setup-1.1.3.exe
+echo [OK] Build complete: SystemAssistant-Setup-1.1.4.exe
 exit /b 0

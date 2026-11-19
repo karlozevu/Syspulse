@@ -19,6 +19,9 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     private Computer? _computer;
     private CancellationTokenSource? _cts;
     private Task? _worker;
+    private Task? _initTask;          // LHM 并行初始化任务，Stop 时必须 Join 防止句柄泄漏
+    private bool _stopping;           // Stop 进行中：拒绝 Start，避免双 worker
+    private volatile bool _disposed;  // Dispose 后不可复活
     private IReadOnlyList<SensorThreshold> _thresholds = Array.Empty<SensorThreshold>();
     private IReadOnlyList<SensorReading> _latest = Array.Empty<SensorReading>();
     private readonly TimeSpan _alertCooldown = TimeSpan.FromMinutes(2);
@@ -42,13 +45,10 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     private long _lastCollectTick;
     private double _lastCostMs;
 
-    /// <summary>数据被视为过期的时间阈值：超过 3 个采集周期没有新快照，界面必须标注。</summary>
-    private TimeSpan StaleThreshold => TimeSpan.FromMilliseconds(Math.Max(1500, RefreshIntervalMs * 3L));
-
     public event Action<SensorSnapshot>? SnapshotUpdated;
     public event Action<ThresholdAlert>? ThresholdExceeded;
 
-    public bool IsRunning => _worker is { IsCompleted: false };
+    public bool IsRunning => !_disposed && !_stopping && _worker is { IsCompleted: false };
 
     /// <summary>实时监控刷新间隔，默认 1 秒（真实时）。下限 250ms，避免过密采样拖垮系统。</summary>
     public int RefreshIntervalMs { get; set; } = 1000;
@@ -83,7 +83,9 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
     {
         lock (_sync)
         {
-            if (IsRunning) return;
+            // _disposed / _stopping 必须在这里检查：Stop 持锁完成 Join 前 Start 会阻塞在锁上，
+            // 拿到锁时 _stopping 已复位、worker 已终止，因此不会出现双 worker。
+            if (_disposed || _stopping || _worker is { IsCompleted: false }) return;
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
             _worker = Task.Run(() => RunLoopAsync(token), token);
@@ -95,19 +97,33 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
 
     public void Stop()
     {
-        CancellationTokenSource? cts;
-        Task? worker;
+        // 整个停止过程（含 Cancel / Join / 资源释放）在锁内串行化：
+        // 这样 IsRunning 变 false 时 worker 与 initTask 都已真正退出，Start 无法插入形成双 worker。
         lock (_sync)
         {
-            cts = _cts;
-            worker = _worker;
-            _cts = null;
-            _worker = null;
+            if (_stopping) return;
+            _stopping = true;
+            try
+            {
+                var cts = _cts;
+                var worker = _worker;
+                var initTask = _initTask;
+                _cts = null;
+                _worker = null;
+                _initTask = null;
+                cts?.Cancel();
+                try { worker?.Wait(TimeSpan.FromSeconds(3)); } catch (AggregateException) { }
+                // 关键：Join 初始化任务。无权限时 OpenComputer 可能阻塞数秒，
+                // 若不等待，它会在 Stop 返回后才把 Computer 登记进来，永远不再释放（句柄泄漏）。
+                try { initTask?.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
+                cts?.Dispose();
+                CloseComputer();
+            }
+            finally
+            {
+                _stopping = false;
+            }
         }
-        cts?.Cancel();
-        try { worker?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
-        cts?.Dispose();
-        CloseComputer();
     }
 
     private async Task RunLoopAsync(CancellationToken token)
@@ -115,8 +131,9 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         try
         {
             // 预热 GetSystemTimes 基准：首次调用只记录采样、返回 null。
-            var warmup = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
-            if (warmup is not null) { _lastCpuUsage = warmup.Value; _hasCpuSample = true; }
+            // 刻意不采用预热的返回值：若预热与首帧恰好跨过一个系统 tick(~15.6ms)，
+            // 该值是基于亚毫秒间隔算出的 0%/100% 失真值，采用它会污染首帧并阻止 WMI 回落。
+            _ = WindowsNativeInfo.GetCpuUsagePercent("sensor-monitor");
 
             // 关键架构：LHM 初始化（Open + 首次 Update）在无管理员权限时可阻塞 2~4 秒。
             // 把它放到独立任务里并行执行，主循环用 Win32 基础指标（CPU / 内存）持续按刷新
@@ -124,9 +141,10 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
             // 这样整个初始化期间都有连续、无空窗的实时数据，而不是卡住几秒。
             var initTask = Task.Run(() =>
             {
-                try { OpenComputer(); }
+                try { OpenComputer(token); }
                 catch (Exception ex) { LastError = "传感器初始化受限：" + ex.Message; }
             }, token);
+            lock (_sync) _initTask = initTask;
 
             // 立即推第一帧（不等定时器），用户点「开始采集」后马上有数据
             CollectOnce(basicOnly: true);
@@ -153,11 +171,12 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         }
         finally
         {
+            lock (_sync) _initTask = null;
             CloseComputer();
         }
     }
 
-    private void OpenComputer()
+    private void OpenComputer(CancellationToken token = default)
     {
         Computer? computer = null;
         try
@@ -174,8 +193,22 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
                 IsBatteryEnabled = true
             };
             computer.Open();
+            // Open() 可能阻塞数秒；期间用户可能已 Stop。若已取消，刚打开的 Computer
+            // 绝不能登记到字段（否则 worker 已退出、无人再释放，造成 Ring0 句柄泄漏）。
+            if (token.IsCancellationRequested || _disposed)
+            {
+                ReleaseComputer(computer);
+                computer = null;
+                return;
+            }
             lock (_sync)
             {
+                if (token.IsCancellationRequested || _disposed)
+                {
+                    ReleaseComputer(computer);
+                    computer = null;
+                    return;
+                }
                 // 若上一次实例尚未释放，先释放再替换，避免驱动句柄泄漏
                 ReleaseComputer(_computer);
                 _computer = computer;
@@ -501,8 +534,11 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
         lock (_sync) thresholds = _thresholds;
         if (thresholds.Count == 0) return;
 
-        foreach (var threshold in thresholds.Where(t => t.Enabled))
+        var index = 0;
+        foreach (var threshold in thresholds)
         {
+            var thresholdIndex = index++;
+            if (!threshold.Enabled) continue;
             foreach (var reading in readings)
             {
                 if (threshold.Kind != reading.Kind) continue;
@@ -510,7 +546,10 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
                     && !string.Equals(threshold.SensorIdentifier, reading.Identifier, StringComparison.OrdinalIgnoreCase)) continue;
                 if (reading.Value <= threshold.MaxValue) continue;
 
-                var key = threshold.SensorIdentifier + "|" + reading.Identifier;
+                // 冷却键必须含阈值身份：同一传感器被多条阈值覆盖时，
+                // 只按 sensor 标识做键会让先触发的阈值把其余阈值在冷却期内全部抑制。
+                var key = $"{thresholdIndex}|{(int)threshold.Kind}|{threshold.MaxValue:G}|"
+                          + $"{threshold.SensorIdentifier}|{reading.Identifier}";
                 if (_lastAlert.TryGetValue(key, out var last) && now - last < _alertCooldown) continue;
                 _lastAlert[key] = now;
                 RaiseThresholdExceeded(new ThresholdAlert { Reading = reading, Threshold = threshold.MaxValue, RaisedAt = now });
@@ -520,6 +559,8 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         Stop();
         Volatile.Write(ref _latest, Array.Empty<SensorReading>());
     }

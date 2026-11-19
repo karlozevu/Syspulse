@@ -290,12 +290,29 @@ public sealed class MainWindow : Window
         }
     }
 
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        // 悬浮仪表盘可以独立存在，并能通过「显示主窗口」把本窗口重新 Show()。
+        // 若此时真正销毁主窗口：OnClosed 会 Dispose 全局单例与 ViewModel，重开的窗口
+        // 将带着已释放的数据上下文且无法恢复。因此悬浮窗仍在时把「关闭」改为「隐藏」，
+        // 让进程与所有服务保持完整；没有悬浮窗时按正常关闭退出。
+        if (e.CloseReason is WindowCloseReason.WindowClosing
+            && FloatingDashboardWindow.Current is { IsVisible: true })
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+        base.OnClosing(e);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         if (_themeHandler is not null) ThemeService.ThemeChanged -= _themeHandler;
         if (_languageHandler is not null) LocalizationService.Instance.LanguageChanged -= _languageHandler;
         _viewModel.Dispose();
-        ServiceHub.Instance.Dispose();
+        // 不在此处 Dispose ServiceHub：全局单例跟随进程生命周期，由 App.Exit 统一释放。
+        // 之前在这里释放会导致「悬浮窗仍开、主窗口被隐藏后又重新显示」时服务已死。
         _viewCache.Clear();
         base.OnClosed(e);
     }

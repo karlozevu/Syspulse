@@ -33,7 +33,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _temperatureThreshold = settings.Thresholds.FirstOrDefault(t => t.Kind == SensorKind.Temperature)?.MaxValue ?? 85;
         ReloadTextFields();
 
-        SaveCommand = new RelayCommand(Save);
+        SaveCommand = CreateSyncCommand(Save);
         BrowseExportCommand = CreateCommand(BrowseExportAsync);
         BrowseBackupCommand = CreateCommand(BrowseBackupAsync);
         CheckUpdateCommand = CreateCommand(CheckUpdateAsync);
@@ -50,7 +50,14 @@ public sealed class SettingsViewModel : ViewModelBase
     public int ThemeIndex { get => _themeIndex; set => Set(ref _themeIndex, Math.Clamp(value, 0, 2)); }
     public int LanguageIndex { get => _languageIndex; set => Set(ref _languageIndex, Math.Clamp(value, 0, 1)); }
     public int RefreshIntervalMs { get => _refreshIntervalMs; set => Set(ref _refreshIntervalMs, Math.Clamp(value, 250, 60_000)); }
-    public double TemperatureThreshold { get => _temperatureThreshold; set => Set(ref _temperatureThreshold, Math.Clamp(value, 30, 120)); }
+    // Math.Clamp(NaN, ...) 返回 NaN，保存时 JsonSerializer 拒绝写 NaN 抛异常。
+    // 非有限值（NaN / ±∞）一律回退默认值，保证配置恒可序列化。
+    public double TemperatureThreshold
+    {
+        get => _temperatureThreshold;
+        set => Set(ref _temperatureThreshold,
+            double.IsFinite(value) ? Math.Clamp(value, 30, 120) : 85);
+    }
     public string ExportPath { get => _exportPath; set => Set(ref _exportPath, value); }
     public string BackupPath { get => _backupPath; set => Set(ref _backupPath, value); }
     public string WhitelistText { get => _whitelistText; set => Set(ref _whitelistText, value); }

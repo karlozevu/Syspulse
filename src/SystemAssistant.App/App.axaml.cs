@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.Logging;
 using SystemAssistant.App.Views;
+using SystemAssistant.Core.Common;
 using SystemAssistant.Utils.Common;
 using SystemAssistant.Utils.Diagnostics;
 
@@ -46,6 +47,10 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow();
+            // 全局服务单例跟随进程生命周期：仅在应用真正退出时释放一次。
+            // 不能在 MainWindow.OnClosed 里释放——悬浮仪表盘可独立存在并把主窗口重新显示，
+            // 那时单例已死会导致服务不可恢复。
+            desktop.ShutdownRequested += (_, _) => ServiceHub.Instance.Dispose();
         }
 
         base.OnFrameworkInitializationCompleted();

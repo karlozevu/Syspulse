@@ -18,11 +18,13 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
     private Task? _worker;
+    private bool _stopping;
+    private volatile bool _disposed;
 
     public event Action<IReadOnlyList<ProcessSnapshot>>? SnapshotUpdated;
 
     public int RefreshIntervalMs { get; set; } = 2000;
-    public bool IsRunning => _worker is { IsCompleted: false };
+    public bool IsRunning => !_disposed && !_stopping && _worker is { IsCompleted: false };
 
     /// <summary>最近一次采样循环的错误，供界面降级提示（不对外抛出）。</summary>
     public string LastError { get; private set; } = string.Empty;
@@ -31,10 +33,9 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
     {
         lock (_sync)
         {
-            if (IsRunning) return;
+            // Stop 持锁完成 Join 期間 Start 阻塞在此，拿到锁时状态已复位，杜绝双 worker
+            if (_disposed || _stopping || _worker is { IsCompleted: false }) return;
             _cts = new CancellationTokenSource();
-            // 必须先取局部 token：lambda 内再读 _cts 时，Stop() 可能已把字段置 null，
-            // 导致 NullReferenceException 或 worker 绑定到新 CTS 而取消失效。
             var token = _cts.Token;
             _worker = Task.Run(() => RunLoopAsync(token), token);
         }
@@ -42,18 +43,22 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
 
     public void Stop()
     {
-        CancellationTokenSource? cts;
-        Task? worker;
         lock (_sync)
         {
-            cts = _cts;
-            worker = _worker;
-            _cts = null;
-            _worker = null;
+            if (_stopping) return;
+            _stopping = true;
+            try
+            {
+                var cts = _cts;
+                var worker = _worker;
+                _cts = null;
+                _worker = null;
+                cts?.Cancel();
+                try { worker?.Wait(TimeSpan.FromSeconds(3)); } catch (AggregateException) { }
+                cts?.Dispose();
+            }
+            finally { _stopping = false; }
         }
-        cts?.Cancel();
-        try { worker?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
-        cts?.Dispose();
     }
 
     private async Task RunLoopAsync(CancellationToken token)
@@ -145,7 +150,9 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
                             ProcessId = pid,
                             Name = process.ProcessName,
                             UserName = owner ?? string.Empty,
-                            CpuPercent = Math.Clamp(cpuPercent, 0, 100 * Environment.ProcessorCount),
+                            // cpuPercent 已除以 ProcessorCount 归一化到 0~100（任务管理器风格），
+                            // 钳制上限必须同样是 100，否则异常值会显示成 800% 的非法百分比。
+                            CpuPercent = double.IsFinite(cpuPercent) ? Math.Clamp(cpuPercent, 0, 100) : 0,
                             WorkingSetBytes = workingSet,
                             DiskReadBytesPerSecond = readPerSecond,
                             DiskWriteBytesPerSecond = writePerSecond,
@@ -214,7 +221,12 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
         });
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Stop();
+    }
 
     private sealed record Sample(DateTime Timestamp, long CpuTicks, ulong ReadBytes, ulong WriteBytes);
 }

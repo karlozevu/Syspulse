@@ -55,7 +55,7 @@ public sealed class ProcessViewModel : ViewModelBase
 
     private void OnSnapshot(IReadOnlyList<ProcessSnapshot> snapshot)
     {
-        Dispatcher.UIThread.Post(() =>
+        PostUI(() =>
         {
             Processes = ApplySort(snapshot);
             ProcessesUpdated?.Invoke();

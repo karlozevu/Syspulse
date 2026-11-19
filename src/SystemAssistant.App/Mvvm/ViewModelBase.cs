@@ -35,11 +35,29 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
     /// <summary>窗口 / ViewModel 关闭时取消，供长时间任务检查。</summary>
     protected CancellationToken LifetimeToken => _lifetime.Token;
 
+    /// <summary>
+    /// 把后台线程的回调切回 UI 线程，并在执行时检查 disposed：
+    /// 事件回调可能在 Post 入队后、执行前窗口已关闭，此时已投递的 lambda 仍会执行，
+    /// 可能在已释放的 ViewModel / 已关闭窗口上操作导致异常。统一在此拦截。
+    /// </summary>
+    protected void PostUI(Action action)
+        => Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!_disposed) action(); });
+
     /// <summary>手动通知所有命令重新计算可用性。</summary>
     protected void RaiseCommandsCanExecute()
     {
         foreach (var command in _commands.ToArray()) command.RaiseCanExecuteChanged();
     }
+
+    /// <summary>
+    /// 创建同步命令并注入统一异常处理器：保存配置等同步操作若写盘失败，
+    /// 错误信息进入状态栏而不是冒泡到 Avalonia 命令框架导致静默失败。
+    /// </summary>
+    protected RelayCommand CreateSyncCommand(Action execute, Func<bool>? canExecute = null)
+        => new(execute, canExecute)
+        {
+            ErrorHandler = ex => StatusMessage = L("Message_ErrorPrefix") + ex.Message
+        };
 
     /// <summary>把异步命令的异常写入状态栏，由基类统一构造命令时调用。</summary>
     protected AsyncRelayCommand CreateCommand(Func<Task> execute, Func<bool>? canExecute = null)

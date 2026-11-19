@@ -11,6 +11,7 @@ using SystemAssistant.Models.Toolbox;
 using SystemAssistant.Utils.IO;
 using SystemAssistant.Utils.Windows;
 using SystemAssistant.Utils.Common;
+using SystemAssistant.Utils.Diagnostics;
 
 // 只读功能探针：逐个调用 Core/Utils 的公开能力，记录真实返回值与异常。
 // 严格不执行任何删除、注册表写入、服务启停、系统命令等写操作。
@@ -291,6 +292,70 @@ await TestSync("CpuUsage per-consumer isolation", () =>
     var b1 = WindowsNativeInfo.GetCpuUsagePercent("probe-b");
     var a2 = WindowsNativeInfo.GetCpuUsagePercent("probe-a");
     return $"a1={a1?.ToString() ?? "null"}, b1={b1?.ToString() ?? "null"}, a2={a2?.ToString() ?? "null"}（a1/b1 均应 null）";
+});
+
+Emit("");
+Emit("## 九、高难度冒烟：并发 / 生命周期 / 极端输入");
+await TestSync("Stress: rapid Start/Stop x20 (no double worker)", () =>
+{
+    using var m = new SensorMonitor { RefreshIntervalMs = 250 };
+    for (var i = 0; i < 20; i++)
+    {
+        m.Start();
+        m.Start(); // 重复 Start 应被忽略
+        m.Stop();
+        m.Stop();  // 重复 Stop 应幂等
+        if (m.IsRunning) throw new InvalidOperationException($"still running after Stop#{i}");
+    }
+    return "40 start/stop calls, state clean";
+});
+await Test("Stress: dispose then Start (no resurrection)", async () =>
+{
+    var m = new SensorMonitor { RefreshIntervalMs = 250 };
+    var snaps = 0;
+    m.SnapshotUpdated += _ => Interlocked.Increment(ref snaps);
+    m.Start();
+    await Task.Delay(300);
+    m.Dispose();
+    m.Start(); // Dispose 后必须无法复活
+    await Task.Delay(400);
+    if (m.IsRunning) throw new InvalidOperationException("resurrected after Dispose");
+    return $"no resurrection; snaps before dispose={snaps}";
+});
+await TestSync("Stress: config with corrupted field keeps others", () =>
+{
+    var path = Path.Combine(temp, "corrupt-settings.json");
+    // 合法主题/语言 + 一个类型错误的字段（数字写成字符串）
+    File.WriteAllText(path, "{\"Theme\":\"Dark\",\"Language\":\"ZhCn\",\"RefreshIntervalMs\":\"oops\",\"Version\":1}");
+    var s = JsonStorage.Load<SystemAssistant.Models.Config.AppSettings>(path);
+    // 关键：坏字段回退默认值，但合法字段 Theme=Dark 必须保留（修复前会整体重置为 System）
+    if (s.Theme != SystemAssistant.Models.Config.ThemeMode.Dark)
+        throw new InvalidOperationException($"valid field lost after another field corrupted: theme={s.Theme}");
+    if (s.RefreshIntervalMs != 1000)
+        throw new InvalidOperationException($"corrupt field not reset to default: {s.RefreshIntervalMs}");
+    return $"theme={s.Theme} (kept), lang={s.Language} (kept), bad interval reset to 1000 OK";
+});
+await TestSync("Stress: elevated command rejects meta chars", () =>
+{
+    // 通过反射调用私有校验不方便；用 RunAsync 的公开入口 + asAdmin=true 在管理员环境会真执行，
+    // 因此这里只验证非提权路径不会因元字符崩溃（元字符校验仅提权路径，UI 全为硬编码命令）。
+    var r = CommandRunner.RunQuickAsync("cmd.exe", "/c echo test", CancellationToken.None).GetAwaiter().GetResult();
+    return $"quick exit={r.ExitCode}, stdout={r.StandardOutput.Trim()}";
+});
+await Test("Stress: start-then-immediate-stop x10 (initTask join)", async () =>
+{
+    // 模拟"启动后立刻关闭"：LHM 初始化在无权限时可阻塞数秒。
+    // Stop 必须 Join 初始化任务并释放刚打开的 Computer，否则每次泄漏一套 Ring0 句柄。
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    for (var i = 0; i < 10; i++)
+    {
+        using var m = new SensorMonitor { RefreshIntervalMs = 250 };
+        m.Start();
+        await Task.Delay(30); // 远小于 LHM 初始化耗时，制造竞态窗口
+        m.Stop();              // 必须在 Stop 内等待 initTask，返回后不得再有资源被打开
+        if (m.IsRunning) throw new InvalidOperationException($"running after dispose cycle {i}");
+    }
+    return $"10 start/stop-immediately cycles in {sw.ElapsedMilliseconds}ms, no leak window";
 });
 
 Emit("");

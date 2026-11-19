@@ -275,10 +275,28 @@ public sealed class HardwareInfoService : IHardwareInfoService
             });
         }
 
-        // 页面文件：GlobalMemoryStatusEx 的提交上限减去当前可用提交量即已用分页
-        var pageUsed = Math.Max(0, commitTotal - commitAvailable);
-        var pageFile = First(CimV2, "Win32_PageFileUsage");
-        var pageTotal = commitTotal > 0 ? commitTotal : (pageFile?.Int64("AllocatedBaseSize") ?? 0) * 1024 * 1024;
+        // 页面文件：GlobalMemoryStatusEx 的 ullTotalPageFile 是"提交上限"（物理内存+页面配额），
+        // 并非页面文件本身大小。优先用 Win32_PageFileUsage 求真实页面文件大小；
+        // 读不到时才回退到提交上限（并让已用量也用提交值，保持分子分母同源）。
+        long pageTotal = 0;
+        try
+        {
+            foreach (var pf in Select(CimV2, "Win32_PageFileUsage"))
+                pageTotal += pf.Int64("AllocatedBaseSize") * 1024L * 1024L;
+        }
+        catch (Exception) { pageTotal = 0; }
+        long pageUsed;
+        if (pageTotal > 0)
+        {
+            // 已用页面文件 = 提交已用 - 物理内存已用，下限 0
+            pageUsed = Math.Clamp((commitTotal - commitAvailable) - (total - available), 0, pageTotal);
+        }
+        else
+        {
+            // 无页面文件 WMI 数据时，退化为提交语义（总量=提交上限、已用=提交已用）
+            pageTotal = Math.Max(0, commitTotal);
+            pageUsed = Math.Max(0, commitTotal - commitAvailable);
+        }
 
         var slotCount = First(CimV2, "Win32_PhysicalMemoryArray")?.Int32("MemoryDevices") ?? 0;
         var channel = modules.Count == 0
@@ -335,10 +353,13 @@ public sealed class HardwareInfoService : IHardwareInfoService
             : readings.Where(r => r.Identifier.StartsWith("/gpu", StringComparison.OrdinalIgnoreCase)
                                   || r.HardwareName.Contains("GPU", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-        for (var i = 0; i < gpus.Count; i++)
+        foreach (var gpu in gpus)
         {
-            var gpu = gpus[i];
-            var matched = gpuReadings.Where(r => MatchGpuIndex(r.Identifier, i, gpus.Count)).ToList();
+            // 用「厂商关键词」建立稳定关联，而不是 WMI 列表位置 i：
+            // WMI Win32_VideoController 的返回顺序与 LHM 的 GPU 序号体系无任何保证，
+            // 双显卡机器上按位置关联会把 A 卡的温度/负载写到 B 卡上。
+            var vendorKey = GpuVendorKey(gpu.Name);
+            var matched = gpuReadings.Where(r => GpuReadingBelongsTo(r.Identifier, vendorKey)).ToList();
             if (matched.Count == 0) continue;
 
             var temperature = matched.Where(r => r.Kind == SensorKind.Temperature).Select(r => r.Value).ToList();
@@ -358,21 +379,33 @@ public sealed class HardwareInfoService : IHardwareInfoService
     }
 
     /// <summary>
-    /// 判断一条 GPU 传感器读数是否属于第 gpuIndex 张显卡。
-    /// LHM Identifier 形如 /gpu-nvidia/0/temperature/3，第二段数字是显卡序号；
-    /// 单卡时全部归给它，多卡按序号对应，无法确定序号时只归第一张避免错配。
+    /// 从 WMI 显卡名提取稳定的厂商关键词：LHM 的 GPU Identifier 首段是
+    /// gpu-nvidia / gpu-amd / gpu-intel，与 WMI 名称里的 NVIDIA / AMD / Radeon / Intel 对应。
+    /// 返回 null 表示无法判定厂商（此时只能保守不关联，避免错配到别的卡）。
     /// </summary>
-    private static bool MatchGpuIndex(string identifier, int gpuIndex, int gpuCount)
+    private static string? GpuVendorKey(string name)
     {
-        if (gpuCount <= 1) return true;
-        // "/gpu-nvidia/0/temperature/3" 去空分割后为
-        // ["gpu-nvidia", "0", "temperature", "3"]：parts[0] 是硬件类型，parts[1] 才是显卡序号。
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("GeForce", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Quadro", StringComparison.OrdinalIgnoreCase)) return "nvidia";
+        if (name.Contains("AMD", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Radeon", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("ATI", StringComparison.OrdinalIgnoreCase)) return "amd";
+        if (name.Contains("Intel", StringComparison.OrdinalIgnoreCase)) return "intel";
+        return null;
+    }
+
+    /// <summary>
+    /// 判断一条 LHM 传感器读数是否属于指定厂商的显卡。
+    /// Identifier 形如 /gpu-nvidia/0/temperature/3，首段硬件类型含稳定厂商名。
+    /// </summary>
+    private static bool GpuReadingBelongsTo(string identifier, string? vendorKey)
+    {
+        if (string.IsNullOrEmpty(identifier) || vendorKey is null) return false;
         var parts = identifier.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length >= 2 && parts[0].StartsWith("gpu", StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(parts[1], out var index))
-            return index == gpuIndex;
-        // 无法解析序号时只归第一张卡，避免错配
-        return gpuIndex == 0;
+        if (parts.Length < 1 || !parts[0].StartsWith("gpu", StringComparison.OrdinalIgnoreCase)) return false;
+        return parts[0].Contains(vendorKey, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -620,7 +653,22 @@ public sealed class HardwareInfoService : IHardwareInfoService
                             RawValue = raw,
                             IsWarning = isWarning
                         });
-                        if (id == 194) temperature = raw & 0xFF;
+                        if (id == 194)
+                        {
+                            // 多数 ATA 盘把温度放在 raw 最低字节；部分厂商 / NVMe 转接
+                            // 编码在高位字节，此时低字节为 0。低字节为 0 时尝试各字节，
+                            // 取第一个落在合理温度区间的值；都取不到则保持 null 显示 N/A。
+                            var low = raw & 0xFF;
+                            if (low >= 1 && low <= 120) temperature = low;
+                            else
+                            {
+                                for (var shift = 8; shift < 64 && low == 0; shift += 8)
+                                {
+                                    var b = (raw >> shift) & 0xFF;
+                                    if (b >= 1 && b <= 120) { temperature = b; break; }
+                                }
+                            }
+                        }
                         if (id == 9) powerOnHours = (int)Math.Min(raw, int.MaxValue);
                         if (id == 12) cycles = (int)Math.Min(raw, int.MaxValue);
                     }

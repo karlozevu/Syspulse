@@ -17,11 +17,27 @@ public sealed class RelayCommand : ICommand
         _canExecute = canExecute;
     }
 
+    /// <summary>统一异常处理入口（可选），与 AsyncRelayCommand 行为对齐。</summary>
+    public Action<Exception>? ErrorHandler { get; set; }
+
     public event EventHandler? CanExecuteChanged;
 
     public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
 
-    public void Execute(object? parameter) => _execute(parameter);
+    public void Execute(object? parameter)
+    {
+        // 同步命令此前完全没有异常保护：保存设置时磁盘满 / 文件占用 / NaN 序列化
+        // 等异常会冒泡到 Avalonia 命令框架，界面无提示且状态栏丢失。这里统一兜底。
+        try
+        {
+            _execute(parameter);
+        }
+        catch (Exception ex)
+        {
+            if (ErrorHandler is not null) ErrorHandler(ex);
+            else throw;
+        }
+    }
 
     public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }

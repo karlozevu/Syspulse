@@ -41,7 +41,7 @@ public sealed class CleanerViewModel : ViewModelBase
         CleanCommand = CreateCommand(CleanAsync, () => !IsBusy && HasResult);
         BackupRegistryCommand = CreateCommand(BackupRegistryAsync, () => !IsBusy);
         AddCustomPathCommand = CreateCommand(AddCustomPathAsync);
-        SaveWhitelistCommand = new RelayCommand(SaveWhitelist);
+        SaveWhitelistCommand = CreateSyncCommand(SaveWhitelist);
         SelectAllCommand = new RelayCommand(() => SetAll(true));
         SelectNoneCommand = new RelayCommand(() => SetAll(false));
 

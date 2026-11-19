@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace SystemAssistant.Utils.Common;
@@ -19,23 +20,77 @@ public static class JsonStorage
         Converters = { new JsonStringEnumConverter() }
     };
 
-    /// <summary>读取 JSON 配置文件；文件不存在或损坏时返回默认值。</summary>
+    /// <summary>
+    /// 读取 JSON 配置文件；文件不存在 / 整体损坏时返回默认值。
+    /// 关键鲁棒性：单个字段类型错误时只回退该字段，其余设置保留——避免一个坏字段
+    /// 导致主题 / 语言 / 白名单 / 阈值等全部用户配置静默丢失。
+    /// </summary>
     public static T Load<T>(string path) where T : class, new()
     {
         lock (Sync)
         {
+            var fallback = new T();
             try
             {
-                if (!File.Exists(path)) return new T();
+                if (!File.Exists(path)) return fallback;
                 var json = File.ReadAllText(path);
-                return string.IsNullOrWhiteSpace(json) ? new T() : JsonSerializer.Deserialize<T>(json, Options) ?? new T();
+                if (string.IsNullOrWhiteSpace(json)) return fallback;
+
+                // 先整体验证；完全合法时走原路径（性能最好、行为不变）
+                try
+                {
+                    return JsonSerializer.Deserialize<T>(json, Options) ?? fallback;
+                }
+                catch (JsonException)
+                {
+                    // 有字段损坏，转入逐字段合并
+                }
+
+                var incoming = JsonNode.Parse(json) as JsonObject;
+                if (incoming is null) return fallback;
+                // 以默认值为基底：默认对象序列化后，逐个用文件里"类型兼容"的字段覆盖，
+                // 类型不匹配（如把数字写成字符串）的字段被跳过、保留默认值。
+                var baseNode = JsonSerializer.SerializeToNode(fallback, Options) as JsonObject
+                               ?? new JsonObject();
+                foreach (var property in baseNode.ToList())
+                {
+                    if (!incoming.TryGetPropertyValue(property.Key, out var value) || value is null) continue;
+                    // 类型必须与原字段一致，否则跳过（bool/数值/字符串/数组各自严格匹配）
+                    if (IsCompatible(property.Value, value))
+                        baseNode[property.Key] = value?.DeepClone();
+                }
+                return baseNode.Deserialize<T>(Options) ?? fallback;
             }
             catch (Exception)
             {
-                // 配置损坏时不能让程序无法启动，直接回落到默认配置
-                return new T();
+                // 文件级错误（编码 / IO / 权限）：整体回落默认，保证程序可启动
+                return fallback;
             }
         }
+    }
+
+    /// <summary>判断文件中的值是否与默认值字段类型兼容（数值可互换，其余需同类）。</summary>
+    private static bool IsCompatible(JsonNode? template, JsonNode? value)
+    {
+        if (value is null) return false;
+        return template switch
+        {
+            JsonObject => value is JsonObject,
+            JsonArray => value is JsonArray,
+            JsonValue v => IsValueCompatible(v, value as JsonValue),
+            _ => true
+        };
+    }
+
+    private static bool IsValueCompatible(JsonValue template, JsonValue? value)
+    {
+        if (value is null) return false;
+        // 允许数值类型互换（如 int 字段写成 1.0），但禁止数字/字符串/bool 混用
+        var numeric = (JsonElement n) => n.ValueKind is JsonValueKind.Number;
+        var t = template.GetValue<JsonElement>();
+        var v = value.GetValue<JsonElement>();
+        if (numeric(t)) return numeric(v);
+        return t.ValueKind == v.ValueKind;
     }
 
     /// <summary>原子写入 JSON 配置文件。</summary>

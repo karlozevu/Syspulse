@@ -56,7 +56,10 @@ public sealed class SensorSnapshot
     /// <summary>本轮是否触发了降级（LHM 不可用 / 读数被过滤等）。非空即为需要提示用户的原因。</summary>
     public string Diagnostic { get; init; } = string.Empty;
 
-    /// <summary>数据是否过期（采集循环已停止或卡顿超过 3 个周期）。过期时界面应标注而非当作当前值。</summary>
+    /// <summary>
+    /// 本轮采集耗时是否超过设定间隔（采样跟不上频率）。界面结合 IsRunning 判断数据新鲜度：
+    /// 采集已停止或本轮超时都应标注，而非把旧数据当作当前值。
+    /// </summary>
     public bool IsStale { get; init; }
 }
 

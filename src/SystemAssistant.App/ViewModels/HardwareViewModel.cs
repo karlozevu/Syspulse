@@ -181,7 +181,7 @@ public sealed class HardwareViewModel : ViewModelBase
     private void OnSnapshot(SensorSnapshot snapshot)
     {
         var count = snapshot.Readings.Count;
-        Dispatcher.UIThread.Post(() =>
+        PostUI(() =>
         {
             SensorCount = count.ToString();
 

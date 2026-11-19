@@ -12,6 +12,17 @@ namespace SystemAssistant.Utils.Diagnostics;
 /// </summary>
 public sealed class CommandRunner
 {
+    // 命令输出上限：异常命令刷屏时防止 StringBuilder 无限扩张耗尽内存。
+    private const int MaxOutputChars = 2 * 1024 * 1024;
+
+    /// <summary>追加输出到缓冲区并截断到上限，返回是否发生过截断。</summary>
+    private static void AppendCapped(StringBuilder builder, string text)
+    {
+        var room = MaxOutputChars - builder.Length;
+        if (room <= 0) return;
+        builder.Append(text, 0, Math.Min(text.Length, room));
+    }
+
     private static readonly Lazy<Encoding> ConsoleEncodingLazy = new(() =>
     {
         try
@@ -36,9 +47,23 @@ public sealed class CommandRunner
     /// </summary>
     /// <param name="asAdmin">是否以管理员权限执行；为 true 且当前非管理员时会弹出 UAC。</param>
     public Task<CommandExecutionResult> RunAsync(string commandLine, CancellationToken token = default, bool asAdmin = false)
-        => asAdmin && !PrivilegeHelper.IsAdministrator
+    {
+        // 提权路径会把命令无转义拼进以 runas 运行的 .cmd 脚本。虽然当前所有调用方
+        // 都是硬编码 / 强校验命令，但作为公共 API 必须防御：拒绝 cmd 元字符，
+        // 避免将来任何一处把用户输入拼进来就变成"以管理员权限执行任意命令"。
+        if (asAdmin && !PrivilegeHelper.IsAdministrator
+            && commandLine.IndexOfAny(new[] { '&', '|', '<', '>', '^', '\r', '\n', '%', '!', '"' }) >= 0)
+        {
+            return Task.FromResult(new CommandExecutionResult
+            {
+                ExitCode = -1,
+                StandardError = "提权命令包含不允许的特殊字符，已拒绝执行"
+            });
+        }
+        return asAdmin && !PrivilegeHelper.IsAdministrator
             ? RunElevatedAsync(commandLine, token)
             : RunDirectAsync(commandLine, token);
+    }
 
     /// <summary>执行简单的短命令，不订阅输出事件。</summary>
     public static async Task<CommandExecutionResult> RunQuickAsync(string fileName, string arguments, CancellationToken token = default)
@@ -50,8 +75,8 @@ public sealed class CommandRunner
         try
         {
             process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (stdout) stdout.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (stderr) stderr.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (stdout) AppendCapped(stdout, e.Data + Environment.NewLine); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (stderr) AppendCapped(stderr, e.Data + Environment.NewLine); };
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -92,13 +117,13 @@ public sealed class CommandRunner
             process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is null) return;
-                lock (stdout) stdout.AppendLine(e.Data);
+                lock (stdout) AppendCapped(stdout, e.Data + Environment.NewLine);
                 OutputReceived?.Invoke(new CommandOutputLine { Text = e.Data });
             };
             process.ErrorDataReceived += (_, e) =>
             {
                 if (e.Data is null) return;
-                lock (stderr) stderr.AppendLine(e.Data);
+                lock (stderr) AppendCapped(stderr, e.Data + Environment.NewLine);
                 OutputReceived?.Invoke(new CommandOutputLine { Text = e.Data, IsError = true });
             };
 
@@ -196,7 +221,7 @@ public sealed class CommandRunner
             if (pendingBytes is { Length: > 0 })
             {
                 var tail = new string(Encoding.UTF8.GetChars(pendingBytes));
-                output.Append(tail);
+                AppendCapped(output, tail);
                 foreach (var line in tail.Replace("\r\n", "\n").Split('\n'))
                     if (!string.IsNullOrWhiteSpace(line))
                         OutputReceived?.Invoke(new CommandOutputLine { Text = line });
@@ -275,7 +300,7 @@ public sealed class CommandRunner
 
             if (text.Length > 0)
             {
-                output.Append(text);
+                AppendCapped(output, text);
                 foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
                 {
                     if (!string.IsNullOrWhiteSpace(line))

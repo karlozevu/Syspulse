@@ -309,7 +309,7 @@ public sealed class OptimizationViewModel : ViewModelBase
 
     private void OnCommandOutput(CommandOutputLine line)
     {
-        Dispatcher.UIThread.Post(() =>
+        PostUI(() =>
         {
             var text = $"{line.Timestamp:HH:mm:ss} {(line.IsError ? "[!] " : "    ")}{line.Text}";
             ConsoleText = (ConsoleText + Environment.NewLine + text).TrimStart();
