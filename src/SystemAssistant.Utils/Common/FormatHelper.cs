@@ -27,9 +27,17 @@ public static class FormatHelper
     {
         if (double.IsNaN(bytesPerSecond) || double.IsInfinity(bytesPerSecond) || bytesPerSecond < 0)
             return "N/A";
-        // (long) 对超出 Int64 的有限值会 unchecked 溢出成负数，"953 EB" 之类会显示成 0 B/s。
-        var clamped = Math.Min(bytesPerSecond, long.MaxValue);
-        return FormatBytes((long)clamped) + "/s";
+        // 不能 (long) 转换：long.MaxValue 转 double 是 2^63，超出 Int64，
+        // unchecked 转换溢出成 long.MinValue → FormatBytes 显示 "0 B/s"。
+        // 直接在 double 域按 1024 进制迭代，支持任意大的有限值。
+        double value = bytesPerSecond;
+        var unit = 0;
+        while (value >= 1024 && unit < Units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+        return $"{value.ToString("F1", CultureInfo.InvariantCulture)} {Units[unit]}/s";
     }
 
     /// <summary>

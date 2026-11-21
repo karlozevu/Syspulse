@@ -26,6 +26,9 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
     public int RefreshIntervalMs { get; set; } = 2000;
     public bool IsRunning => !_disposed && !_stopping && _worker is { IsCompleted: false };
 
+    /// <summary>刷新间隔钳制，与 SensorMonitor / 设置页保持一致的 250ms 下限。</summary>
+    internal static int ClampInterval(int ms) => Math.Clamp(ms, 250, 60_000);
+
     /// <summary>最近一次采样循环的错误，供界面降级提示（不对外抛出）。</summary>
     public string LastError { get; private set; } = string.Empty;
 
@@ -43,21 +46,28 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
 
     public void Stop()
     {
+        CancellationTokenSource? cts;
+        Task? worker;
+        // 与 SensorMonitor 一致：锁内只切换状态，锁外 Wait。
+        // SampleOnce 内部会 lock(_sync)，若持锁 Wait 可能形成自锁导致停止卡顿。
         lock (_sync)
         {
             if (_stopping) return;
             _stopping = true;
-            try
-            {
-                var cts = _cts;
-                var worker = _worker;
-                _cts = null;
-                _worker = null;
-                cts?.Cancel();
-                try { worker?.Wait(TimeSpan.FromSeconds(3)); } catch (AggregateException) { }
-                cts?.Dispose();
-            }
-            finally { _stopping = false; }
+            cts = _cts;
+            worker = _worker;
+            _cts = null;
+            _worker = null;
+            cts?.Cancel();
+        }
+        try
+        {
+            try { worker?.Wait(TimeSpan.FromSeconds(3)); } catch (AggregateException) { }
+            cts?.Dispose();
+        }
+        finally
+        {
+            lock (_sync) _stopping = false;
         }
     }
 
@@ -65,13 +75,16 @@ public sealed class ProcessMonitor : IProcessMonitor, IDisposable
     {
         FireAndForget(RefreshOwnersAsync);
         var lastOwnerRefresh = DateTime.UtcNow;
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000)));
+        // 下限与 SensorMonitor / 设置页统一为 250ms：此前这里是 500ms，
+        // 用户设 250ms 时传感器按 250 刷新、进程列表却仍 500，设置未真正生效。
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(ClampInterval(RefreshIntervalMs)));
         try
         {
             while (await timer.WaitForNextTickAsync(token))
             {
-                if (Math.Abs(timer.Period.TotalMilliseconds - RefreshIntervalMs) > 1)
-                    timer.Period = TimeSpan.FromMilliseconds(Math.Clamp(RefreshIntervalMs, 500, 60_000));
+                var target = ClampInterval(RefreshIntervalMs);
+                if (Math.Abs(timer.Period.TotalMilliseconds - target) > 1)
+                    timer.Period = TimeSpan.FromMilliseconds(target);
 
                 var snapshot = SampleOnce();
                 RaiseSnapshotUpdated(snapshot);

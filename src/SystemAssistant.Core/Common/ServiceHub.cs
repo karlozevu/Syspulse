@@ -1,5 +1,6 @@
 using SystemAssistant.Core.Cleaning;
 using SystemAssistant.Core.Hardware;
+using SystemAssistant.Core.Health;
 using SystemAssistant.Core.Interfaces;
 using SystemAssistant.Core.Optimization;
 using SystemAssistant.Core.Processes;
@@ -40,6 +41,20 @@ public sealed class ServiceHub : IDisposable
         ProcessService = new ProcessService(OperationLog);
         Toolbox = new ToolboxService(OperationLog);
         Update = new UpdateCheckService(() => Settings.Current.UpdateCheckUrl);
+        AlertHistory = new AlertHistoryService();
+        HealthCheck = new HealthCheckService(Hardware, Sensors);
+        NetworkMonitor = new NetworkMonitorService();
+        // 阈值告警落盘：弹窗由 UI 层订阅处理，历史记录在此统一接线，保证任何 UI 状态下都有记录
+        Sensors.ThresholdExceeded += a => AlertHistory.Append(new SystemAssistant.Models.Health.AlertHistoryEntry
+        {
+            Timestamp = a.RaisedAt,
+            SensorName = a.Reading.DisplayName,
+            HardwareName = a.Reading.HardwareName,
+            WatchKind = (SystemAssistant.Models.Health.SensorKind)(int)a.Reading.Kind,
+            Value = a.Reading.Value,
+            Threshold = a.Threshold,
+            Unit = a.Reading.Unit
+        });
 
         OperationLog.Log(OperationType.Security, "程序启动",
             $"版本 {Update.CurrentVersion}，管理员权限：{SystemAssistant.Utils.Windows.PrivilegeHelper.IsAdministrator}", true);
@@ -63,6 +78,9 @@ public sealed class ServiceHub : IDisposable
     public IProcessService ProcessService { get; }
     public IToolboxService Toolbox { get; }
     public IUpdateCheckService Update { get; }
+    public IAlertHistoryService AlertHistory { get; }
+    public IHealthCheckService HealthCheck { get; }
+    public INetworkMonitorService NetworkMonitor { get; }
 
     /// <summary>把设置页的修改同步到运行中的采集器（即时生效，无需重启）。</summary>
     public void ApplyRuntimeSettings()
@@ -77,5 +95,6 @@ public sealed class ServiceHub : IDisposable
     {
         (Sensors as IDisposable)?.Dispose();
         (Processes as IDisposable)?.Dispose();
+        NetworkMonitor.Dispose();
     }
 }

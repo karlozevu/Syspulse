@@ -20,6 +20,7 @@ public static class AppPaths
     public static string SettingsFile => Path.Combine(Root, "settings.json");
     public static string OperationLogFile => Path.Combine(Root, "operations.jsonl");
     public static string DiagnosticsLogFile => Path.Combine(Root, "diagnostics.log");
+    public static string AlertHistoryFile => Path.Combine(Root, "alerts.jsonl");
     public static string BackupDirectory => Path.Combine(Root, "RegistryBackups");
 
     /// <summary>默认导出目录（用户桌面）。</summary>

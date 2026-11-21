@@ -18,6 +18,7 @@ public static partial class PageViewLocator
     {
         OverviewViewModel vm => BuildOverviewPage(vm),
         HardwareViewModel vm => BuildHardwarePage(vm),
+        HealthViewModel vm => BuildHealthPage(vm),
         CleanerViewModel vm => BuildCleanerPage(vm),
         OptimizationViewModel vm => BuildOptimizationPage(vm),
         ProcessViewModel vm => BuildProcessPage(vm),

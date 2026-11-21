@@ -2,6 +2,7 @@ using SystemAssistant.Models.Cleaning;
 using SystemAssistant.Models.Common;
 using SystemAssistant.Models.Config;
 using SystemAssistant.Models.Hardware;
+using SystemAssistant.Models.Health;
 using SystemAssistant.Models.Optimization;
 using SystemAssistant.Models.Processes;
 using SystemAssistant.Models.Toolbox;
@@ -183,4 +184,30 @@ public interface IUpdateCheckService
     string CurrentVersion { get; }
 
     Task<AppVersionInfo> CheckAsync(CancellationToken token = default);
+}
+
+/// <summary>硬件阈值告警历史（落盘持久化）。</summary>
+public interface IAlertHistoryService
+{
+    void Append(AlertHistoryEntry entry);
+    IReadOnlyList<AlertHistoryEntry> GetAll();
+    void Clear();
+}
+
+/// <summary>系统健康体检（只读汇总 + 评分）。</summary>
+public interface IHealthCheckService
+{
+    Task<HealthReport> RunAsync(CancellationToken token = default);
+}
+
+/// <summary>实时网络监控（速率采样 + 接口流量）。</summary>
+public interface INetworkMonitorService : IDisposable
+{
+    event Action<IReadOnlyList<NetworkSample>>? SampleUpdated;
+    bool IsRunning { get; }
+    int RefreshIntervalMs { get; set; }
+    IReadOnlyList<NetworkInterfaceInfo> Interfaces { get; }
+    IReadOnlyList<NetworkInterfaceInfo> GetInterfaces();
+    void Start();
+    void Stop();
 }

@@ -102,7 +102,7 @@ def read_project_version(root: Path) -> str:
                           props.read_text(encoding="utf-8"))
         if match:
             return match.group(1).strip()
-    return "1.1.5"
+    return "1.1.6"
 
 
 def read_tracked_files(root: Path):

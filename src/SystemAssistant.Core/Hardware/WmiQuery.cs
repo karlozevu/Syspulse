@@ -13,14 +13,37 @@ internal static class WmiQuery
     public const string WmiRoot = @"root\WMI";
     public const string Storage = @"root\Microsoft\Windows\Storage";
 
+    // WMI provider 可能挂起（存储库损坏 / 第三方 provider 有缺陷）。ManagementObjectSearcher.Get()
+    // 本身不响应取消，若直接同步调用会永久阻塞后台线程，让硬件页永远停在"加载中"。
+    // 用带超时的 Task 包裹：超时就放弃等待（WMI 对象最终由 GC 回收，不会崩页面）。
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(8);
+
+    private static T WithTimeout<T>(Func<T> query, T fallback)
+    {
+        try
+        {
+            var task = Task.Run(query);
+            return task.Wait(QueryTimeout) ? task.Result : fallback;
+        }
+        catch (AggregateException)
+        {
+            return fallback;
+        }
+    }
+
     /// <summary>执行 SELECT 查询并把结果转成「属性名 → 值」字典，自动释放 WMI 对象。</summary>
     public static IReadOnlyList<WmiObject> Select(string scope, string className, string? condition = null)
+        => WithTimeout(() => SelectCore(scope, className, condition), Array.Empty<WmiObject>());
+
+    private static IReadOnlyList<WmiObject> SelectCore(string scope, string className, string? condition)
     {
         var result = new List<WmiObject>();
         var query = $"SELECT * FROM {className}" + (string.IsNullOrWhiteSpace(condition) ? "" : $" WHERE {condition}");
         try
         {
-            using var searcher = new ManagementObjectSearcher(scope, query);
+            var options = new System.Management.EnumerationOptions { Timeout = QueryTimeout, ReturnImmediately = false };
+            using var searcher = new ManagementObjectSearcher(new ManagementScope(scope),
+                new ObjectQuery(query), options);
             using var collection = searcher.Get();
             foreach (ManagementObject mo in collection)
             {
@@ -50,11 +73,16 @@ internal static class WmiQuery
 
     /// <summary>遍历活动 WMI 对象（用于 GetRelated 关联查询）。回调期间对象有效。</summary>
     public static void ForEach(string scope, string className, Action<ManagementObject> action, string? condition = null)
+        => WithTimeout(() => { ForEachCore(scope, className, action, condition); return true; }, false);
+
+    private static void ForEachCore(string scope, string className, Action<ManagementObject> action, string? condition)
     {
         var query = $"SELECT * FROM {className}" + (string.IsNullOrWhiteSpace(condition) ? "" : $" WHERE {condition}");
         try
         {
-            using var searcher = new ManagementObjectSearcher(scope, query);
+            var options = new System.Management.EnumerationOptions { Timeout = QueryTimeout, ReturnImmediately = false };
+            using var searcher = new ManagementObjectSearcher(new ManagementScope(scope),
+                new ObjectQuery(query), options);
             using var collection = searcher.Get();
             foreach (ManagementObject mo in collection)
             {

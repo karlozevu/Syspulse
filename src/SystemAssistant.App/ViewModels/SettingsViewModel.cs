@@ -147,7 +147,16 @@ public sealed class SettingsViewModel : ViewModelBase
 
     private void OnSettingsChanged()
     {
-        if (ReloadTextFields()) RaiseAll();
+        var changed = ReloadTextFields();
+        // 主题 / 语言是「即时生效」字段：顶栏切换会立即 Settings.Update 落盘，
+        // 若设置页缓存的选中项不跟随，用户在设置页点保存时就会用旧值把顶栏的改动覆盖回去。
+        // 刷新间隔 / 阈值是「保存才生效」，仍不在此重载，以免覆盖用户尚未保存的编辑。
+        var settings = Services.Settings.Current;
+        var theme = (int)settings.Theme;
+        var language = (int)settings.Language;
+        if (_themeIndex != theme) { _themeIndex = theme; changed = true; }
+        if (_languageIndex != language) { _languageIndex = language; changed = true; }
+        if (changed) RaiseAll();
     }
 
     private string BuildUpdateMessage(SystemAssistant.Models.Common.AppVersionInfo info) =>

@@ -23,12 +23,20 @@ public sealed class CommandRunner
         builder.Append(text, 0, Math.Min(text.Length, room));
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetConsoleOutputCP();
+
     private static readonly Lazy<Encoding> ConsoleEncodingLazy = new(() =>
     {
         try
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
+            // 用系统 API 取真实控制台输出代码页，而不是从 CurrentCulture 推断：
+            // 显示语言（en-US）与非 Unicode 程序语言（GBK/936）可以不一致，
+            // 用 CultureInfo 猜测会把中文命令输出解成乱码。
+            var cp = GetConsoleOutputCP();
+            if (cp == 0) cp = (uint)CultureInfo.CurrentCulture.TextInfo.OEMCodePage;
+            return Encoding.GetEncoding((int)cp);
         }
         catch
         {

@@ -1,9 +1,52 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using SystemAssistant.Core.Interfaces;
 using SystemAssistant.Models.Common;
 using SystemAssistant.Models.Optimization;
 
 namespace SystemAssistant.Core.Optimization;
+
+/// <summary>写注册表后通知系统刷新设置的 Win32 调用。</summary>
+internal static class SystemSettingNotifier
+{
+    private const uint SPI_SETANIMATION = 0x0049;
+    private const uint SPIF_UPDATEINIFILE = 0x01;
+    private const uint SPIF_SENDCHANGE = 0x02;
+    private static readonly IntPtr HWND_BROADCAST = new(0xffff);
+    private const uint WM_SETTINGCHANGE = 0x001A;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ANIMATIONINFO { public uint cbSize; public int iMinAnimate; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref ANIMATIONINFO pvParam, uint fWinIni);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam,
+        string lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+
+    /// <summary>
+    /// 窗口动画：用 SPI_SETANIMATION 同时写设置并让当前会话立即生效。
+    /// 该 API 会以系统期望的 REG_SZ 类型维护 MinAnimate，避免直接写 DWORD 导致类型不符。
+    /// </summary>
+    public static bool SetMinAnimate(bool enabled)
+    {
+        var info = new ANIMATIONINFO { cbSize = (uint)Marshal.SizeOf<ANIMATIONINFO>(), iMinAnimate = enabled ? 1 : 0 };
+        return SystemParametersInfo(SPI_SETANIMATION, info.cbSize, ref info, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+    }
+
+    /// <summary>广播设置变更，让 Explorer 等进程重新读取相关配置（带超时，避免挂起 UI）。</summary>
+    public static void BroadcastSettingChange(string section)
+    {
+        try
+        {
+            SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, IntPtr.Zero, section,
+                SMTO_ABORTIFHUNG, 2000, out _);
+        }
+        catch { /* 广播失败不影响已写入的注册表值 */ }
+    }
+}
 
 /// <summary>
 /// 简易系统调优。只提供开关的读取与「显式调用才写入」的接口，
@@ -81,11 +124,25 @@ public sealed class SystemTuningService : ISystemTuningService
 
         try
         {
-            using var baseKey = RegistryKey.OpenBaseKey(ToRegistryHive(definition.Hive), RegistryView.Registry64);
-            using var key = baseKey.CreateSubKey(definition.RegistryPath, writable: true);
-            if (key is null) return OperationResult.Fail("无法打开注册表键，可能需要管理员权限");
-            key.SetValue(definition.ValueName, enabled ? definition.EnabledValue : definition.DisabledValue,
-                RegistryValueKind.DWord);
+            // 窗口动画用 SPI_SETANIMATION：它以系统期望的类型写入 MinAnimate 并立即生效。
+            // 直接写 DWORD 会让"已开启/已关闭"成为假成功——注册表变了但当前会话动画不变，
+            // 且 Windows 期望 MinAnimate 为 REG_SZ，类型改写后可能被忽略。
+            var isAnimation = definition.Id.Equals("animations", StringComparison.OrdinalIgnoreCase);
+            if (isAnimation)
+            {
+                if (!SystemSettingNotifier.SetMinAnimate(enabled))
+                    return OperationResult.Fail("系统拒绝了动画设置变更，可能需要重新登录");
+            }
+            else
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(ToRegistryHive(definition.Hive), RegistryView.Registry64);
+                using var key = baseKey.CreateSubKey(definition.RegistryPath, writable: true);
+                if (key is null) return OperationResult.Fail("无法打开注册表键，可能需要管理员权限");
+                key.SetValue(definition.ValueName, enabled ? definition.EnabledValue : definition.DisabledValue,
+                    RegistryValueKind.DWord);
+                // 写后广播变更，让 Explorer 等进程重新读取（如开始菜单建议项），否则需注销才生效。
+                SystemSettingNotifier.BroadcastSettingChange("Environment");
+            }
             _log.Log(OperationType.SystemTuning, "修改系统调优项",
                 $"{definition.Name} → {(enabled ? "开启" : "关闭")}（{definition.RegistryPath}\\{definition.ValueName}）", true);
             return OperationResult.Ok();

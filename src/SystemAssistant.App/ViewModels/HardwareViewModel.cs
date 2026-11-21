@@ -169,7 +169,11 @@ public sealed class HardwareViewModel : ViewModelBase
         BatteryWear = o.Battery.IsFullChargeCapacityKnown
             ? $"{o.Battery.WearPercent:F1} %" : L("Common_NA");
         BatteryCycles = o.Battery.CycleCount >= 0 ? o.Battery.CycleCount.ToString() : L("Common_NA");
-        BatteryCharge = $"{o.Battery.ChargePercent:F1} % ({(o.Battery.IsCharging ? L("Label_Charging") : L("Label_NotCharging"))})";
+        // 与概览页/导出报告口径一致：满充容量未知时 ChargePercent 恒为 0，
+        // 不能把"读不到"显示成"0% 电量耗尽"误导用户。
+        BatteryCharge = o.Battery.IsFullChargeCapacityKnown
+            ? $"{o.Battery.ChargePercent:F1} % ({(o.Battery.IsCharging ? L("Label_Charging") : L("Label_NotCharging"))})"
+            : L("Common_NA");
 
         DisplayList = o.Displays.Count == 0 ? L("Common_None") : string.Join(Environment.NewLine,
             o.Displays.Select(d => $"{(d.IsPrimary ? "● " : "○ ")}{d.DeviceName}  {d.ResolutionText}  " +

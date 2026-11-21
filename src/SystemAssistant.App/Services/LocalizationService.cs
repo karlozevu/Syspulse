@@ -32,7 +32,9 @@ public sealed class LocalizationService
     public string Format(string key, params object[] args)
     {
         var template = Get(key);
-        try { return string.Format(System.Globalization.CultureInfo.CurrentCulture, template, args); }
+        // 用 InvariantCulture：与 FormatHelper 的小数位表示保持一致，避免同一界面里
+        // "65,5°C" 与 "1.2 GB" 小数点符号混用（逗号小数区域会出现该问题）。
+        try { return string.Format(System.Globalization.CultureInfo.InvariantCulture, template, args); }
         catch (FormatException) { return template; }
     }
 

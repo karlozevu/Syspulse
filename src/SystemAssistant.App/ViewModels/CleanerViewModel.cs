@@ -172,10 +172,11 @@ public sealed class CleanerViewModel : ViewModelBase
             var result = await Services.Clean.CleanAsync(selected, highRiskConfirmed: true, progress);
             StatusMessage = LF("Cleaner_Result", result.SucceededCount, result.FailedCount,
                 FormatHelper.FormatBytes(result.ReclaimedBytes));
-            if (result.Errors.Count > 0)
-            {
-                WarningText = string.Join(Environment.NewLine, result.Errors.Take(20));
-            }
+            // 无条件重写警告区：此前只在有错误时赋值，清理全部成功时旧扫描警告
+            // （如"浏览器运行中"）会残留，与"失败 0 项"的结果自相矛盾。
+            WarningText = result.Errors.Count > 0
+                ? string.Join(Environment.NewLine, result.Errors.Take(20))
+                : string.Empty;
             Groups = Array.Empty<ScanGroup>();
             HasResult = false;
             GroupsChanged?.Invoke();

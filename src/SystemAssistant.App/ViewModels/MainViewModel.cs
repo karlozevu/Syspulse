@@ -16,7 +16,7 @@ namespace SystemAssistant.App.ViewModels;
 /// <summary>页面标识。</summary>
 public enum PageKind
 {
-    Overview, Hardware, Cleaner, Optimization, Processes, Toolbox, Settings, Logs
+    Overview, Hardware, Health, Cleaner, Optimization, Processes, Toolbox, Settings, Logs
 }
 
 /// <summary>侧边栏导航项。</summary>
@@ -79,6 +79,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             new NavigationItem { Kind = PageKind.Overview, Icon = "▤", LabelKey = "Nav_Overview", Group = "Nav_Group_Main" },
             new NavigationItem { Kind = PageKind.Hardware, Icon = "◈", LabelKey = "Nav_Hardware", Group = "Nav_Group_Main" },
+            new NavigationItem { Kind = PageKind.Health, Icon = "✚", LabelKey = "Nav_Health", Group = "Nav_Group_Main" },
             new NavigationItem { Kind = PageKind.Processes, Icon = "◫", LabelKey = "Nav_Process", Group = "Nav_Group_Main" },
             new NavigationItem { Kind = PageKind.Cleaner, Icon = "⌫", LabelKey = "Nav_Cleaner", Group = "Nav_Group_Tools" },
             new NavigationItem { Kind = PageKind.Optimization, Icon = "⚙", LabelKey = "Nav_Optimize", Group = "Nav_Group_Tools" },
@@ -192,6 +193,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         PageKind.Overview => new OverviewViewModel(),
         PageKind.Hardware => new HardwareViewModel(),
+        PageKind.Health => new HealthViewModel(),
         PageKind.Cleaner => new CleanerViewModel(),
         PageKind.Optimization => new OptimizationViewModel(),
         PageKind.Processes => new ProcessViewModel(),

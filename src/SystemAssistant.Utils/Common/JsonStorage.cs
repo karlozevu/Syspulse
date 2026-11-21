@@ -48,18 +48,41 @@ public static class JsonStorage
 
                 var incoming = JsonNode.Parse(json) as JsonObject;
                 if (incoming is null) return fallback;
-                // 以默认值为基底：默认对象序列化后，逐个用文件里"类型兼容"的字段覆盖，
-                // 类型不匹配（如把数字写成字符串）的字段被跳过、保留默认值。
-                var baseNode = JsonSerializer.SerializeToNode(fallback, Options) as JsonObject
-                               ?? new JsonObject();
-                foreach (var property in baseNode.ToList())
+
+                // 以默认值为基底，逐字段独立验证：对每个字段单独构造"默认值对象 + 单一覆盖字段"
+                // 并试反序列化，成功才采用该文件值，失败（数组内坏元素 / 非法枚举值 /
+                // 类型不符）只让该字段保留默认。绝不整段接受后再统一反序列化——那样任何一个
+                // 坏元素都会让全部用户配置（主题/语言/白名单/阈值）一起丢失。
+                var result = JsonSerializer.SerializeToNode(fallback, Options) as JsonObject
+                             ?? new JsonObject();
+                var defaults = (JsonObject)(JsonSerializer.SerializeToNode(fallback, Options) ?? new JsonObject());
+                foreach (var defaultKv in defaults)
                 {
-                    if (!incoming.TryGetPropertyValue(property.Key, out var value) || value is null) continue;
-                    // 类型必须与原字段一致，否则跳过（bool/数值/字符串/数组各自严格匹配）
-                    if (IsCompatible(property.Value, value))
-                        baseNode[property.Key] = value?.DeepClone();
+                    var key = defaultKv.Key;
+                    // 大小写不敏感查找（Options 里启用了 PropertyNameCaseInsensitive）
+                    JsonNode? value = null;
+                    var found = false;
+                    foreach (var kv in incoming)
+                    {
+                        if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                        { value = kv.Value; found = true; break; }
+                    }
+                    if (!found || value is null) continue;
+
+                    // 单字段试解析：把该字段替换进默认对象，看能否成功反序列化
+                    var probe = (JsonObject)defaults.DeepClone();
+                    probe[key] = value.DeepClone();
+                    try
+                    {
+                        var parsed = probe.Deserialize<T>(Options);
+                        if (parsed is not null) result[key] = value.DeepClone();
+                    }
+                    catch (JsonException)
+                    {
+                        // 该字段的值非法：保留默认值，不影响其它字段
+                    }
                 }
-                return baseNode.Deserialize<T>(Options) ?? fallback;
+                return result.Deserialize<T>(Options) ?? fallback;
             }
             catch (Exception)
             {
@@ -67,30 +90,6 @@ public static class JsonStorage
                 return fallback;
             }
         }
-    }
-
-    /// <summary>判断文件中的值是否与默认值字段类型兼容（数值可互换，其余需同类）。</summary>
-    private static bool IsCompatible(JsonNode? template, JsonNode? value)
-    {
-        if (value is null) return false;
-        return template switch
-        {
-            JsonObject => value is JsonObject,
-            JsonArray => value is JsonArray,
-            JsonValue v => IsValueCompatible(v, value as JsonValue),
-            _ => true
-        };
-    }
-
-    private static bool IsValueCompatible(JsonValue template, JsonValue? value)
-    {
-        if (value is null) return false;
-        // 允许数值类型互换（如 int 字段写成 1.0），但禁止数字/字符串/bool 混用
-        var numeric = (JsonElement n) => n.ValueKind is JsonValueKind.Number;
-        var t = template.GetValue<JsonElement>();
-        var v = value.GetValue<JsonElement>();
-        if (numeric(t)) return numeric(v);
-        return t.ValueKind == v.ValueKind;
     }
 
     /// <summary>原子写入 JSON 配置文件。</summary>

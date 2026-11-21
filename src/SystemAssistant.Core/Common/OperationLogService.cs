@@ -71,13 +71,22 @@ public sealed class OperationLogService : IOperationLogService
         ExportHelper.WriteText(path, builder.ToString());
     }
 
+    /// <summary>清空日志。与 Log() 一致做双重异常隔离：磁盘满 / 文件被独占时不破坏主业务。</summary>
     public void Clear()
     {
         lock (_sync)
         {
-            File.WriteAllText(_path, string.Empty);
+            try { File.WriteAllText(_path, string.Empty); }
+            catch (Exception) { /* 清空失败不影响调用方，日志保留到下次重试 */ }
         }
-        Changed?.Invoke();
+        // 逐个订阅者保护：单个 UI 订阅者异常不能让清空操作整体抛错。
+        var handlers = Changed;
+        if (handlers is null) return;
+        foreach (Delegate handler in handlers.GetInvocationList())
+        {
+            try { ((Action)handler)(); }
+            catch (Exception) { }
+        }
     }
 
     private static string Csv(string value)

@@ -97,32 +97,34 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
 
     public void Stop()
     {
-        // 整个停止过程（含 Cancel / Join / 资源释放）在锁内串行化：
-        // 这样 IsRunning 变 false 时 worker 与 initTask 都已真正退出，Start 无法插入形成双 worker。
+        CancellationTokenSource? cts;
+        Task? worker;
+        // 锁内只做状态切换与字段摘取，绝不持锁 Wait：
+        // worker 的 finally 里需要 lock(_sync) 清理 _initTask，若 Stop 持锁等待 worker，
+        // 就形成自锁——worker 拿不到锁无法结束，Wait 必然超时 3 秒（每次停止/关闭都卡顿）。
+        // _stopping 在锁外等待期间保持 true，Start 在锁内检查它会被拒绝，因此仍无双 worker。
         lock (_sync)
         {
             if (_stopping) return;
             _stopping = true;
-            try
-            {
-                var cts = _cts;
-                var worker = _worker;
-                var initTask = _initTask;
-                _cts = null;
-                _worker = null;
-                _initTask = null;
-                cts?.Cancel();
-                try { worker?.Wait(TimeSpan.FromSeconds(3)); } catch (AggregateException) { }
-                // 关键：Join 初始化任务。无权限时 OpenComputer 可能阻塞数秒，
-                // 若不等待，它会在 Stop 返回后才把 Computer 登记进来，永远不再释放（句柄泄漏）。
-                try { initTask?.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
-                cts?.Dispose();
-                CloseComputer();
-            }
-            finally
-            {
-                _stopping = false;
-            }
+            cts = _cts;
+            worker = _worker;
+            _cts = null;
+            _worker = null;
+            cts?.Cancel();
+        }
+        try
+        {
+            try { worker?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+            // 不等待 initTask：OpenComputer 在 Open() 返回后会检查取消令牌并自行
+            // ReleaseComputer，因此 Cancel 后它会自己清理，Stop 无需阻塞数秒等它。
+            // 之前 Wait(initTask) 导致无权限机器上关闭窗口卡 2~3 秒（Open 无法被取消中断）。
+            cts?.Dispose();
+            CloseComputer();
+        }
+        finally
+        {
+            lock (_sync) _stopping = false;
         }
     }
 
@@ -403,7 +405,8 @@ public sealed class SensorMonitor : ISensorMonitor, IDisposable
             SensorKind.Load => v >= 0 && v <= 100,
             SensorKind.Clock => v >= 0 && v <= 20_000,
             SensorKind.Fan => v >= 0 && v <= 30_000,
-            SensorKind.Voltage => v >= 0 && v <= 100,
+            // ATX 电源有合规的负电压轨（-12V / -5V），不能一律按负值过滤掉
+            SensorKind.Voltage => v >= -20 && v <= 100,
             SensorKind.Power => v >= 0 && v <= 2000,
             _ => true
         };

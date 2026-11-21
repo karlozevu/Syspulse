@@ -90,5 +90,7 @@ public static class DialogService
     }
 
     /// <summary>权限不足时引导提升权限（用户主动点击才会调用）。</summary>
-    public static bool Elevate() => PrivilegeHelper.RestartElevated();
+    // 传 --elevated 让新进程跳过单实例互斥检查：提权时新旧实例会短暂并存，
+    // 旧实例随即 Shutdown，若因互斥挡住管理员窗口会导致提权后什么都没打开。
+    public static bool Elevate() => PrivilegeHelper.RestartElevated("--elevated");
 }
