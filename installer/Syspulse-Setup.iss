@@ -1,27 +1,27 @@
 ; ============================================================================
-;  System Assistant 1.1.6 -- Inno Setup 6 installer script
+;  Syspulse 1.2.0 -- Inno Setup 6 installer script
 ;  ---------------------------------------------------------------------------
 ;  * Per-user installation: no administrator rights, no UAC prompt.
-;    Default directory is %LOCALAPPDATA%\Programs\System Assistant ({userpf}).
+;    Default directory is %LOCALAPPDATA%\Programs\Syspulse ({userpf}).
 ;  * Uninstall information is written by [Registry] into HKCU under the exact
-;    key "Software\Microsoft\Windows\CurrentVersion\Uninstall\System Assistant".
+;    key "Software\Microsoft\Windows\CurrentVersion\Uninstall\Syspulse".
 ;  * The uninstaller removes installed files, shortcuts and the uninstall key.
-;    USER DATA IS NEVER TOUCHED: %LOCALAPPDATA%\SystemAssistant (application
+;    USER DATA IS NEVER TOUCHED: %LOCALAPPDATA%\Syspulse (application
 ;    settings and logs) is deliberately outside of every delete operation.
 ;    There is intentionally no [InstallDelete] / [UninstallDelete] section.
 ;  * Build with: scripts\build-installer.cmd
 ; ============================================================================
 
-#define MyAppName      "System Assistant"
-#define MyAppVersion   "1.1.6"
-#define MyAppPublisher "System Assistant Project"
-#define MyAppURL       "https://github.com/karlozevu/System-Assistant"
-#define MyAppExeName   "SystemAssistant.exe"
-#define MyUninstKey    "Software\Microsoft\Windows\CurrentVersion\Uninstall\System Assistant"
+#define MyAppName      "Syspulse"
+#define MyAppVersion   "1.2.0"
+#define MyAppPublisher "Syspulse Project"
+#define MyAppURL       "https://github.com/karlozevu/Syspulse"
+#define MyAppExeName   "Syspulse.exe"
+#define MyUninstKey    "Software\Microsoft\Windows\CurrentVersion\Uninstall\Syspulse"
 
 [Setup]
 ; --- Application identity (also feeds the setup.exe version resource) -----
-AppId=System Assistant
+AppId=Syspulse
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -30,17 +30,17 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppCopyright=Copyright (C) 2026 {#MyAppPublisher}
-VersionInfoVersion=1.1.6.0
+VersionInfoVersion=1.2.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}
 VersionInfoProductTextVersion={#MyAppVersion}
-VersionInfoOriginalFileName=SystemAssistant-Setup-1.1.6.exe
+VersionInfoOriginalFileName=Syspulse-Setup-1.2.0.exe
 
 ; --- Per-user install (no UAC) --------------------------------------------
 PrivilegesRequired=lowest
 ; {userpf} = %LOCALAPPDATA%\Programs on Windows 10/11
-DefaultDirName={userpf}\System Assistant
+DefaultDirName={userpf}\Syspulse
 
 ; --- Uninstall -------------------------------------------------------------
 ; We write the HKCU uninstall key ourselves (see [Registry]) so that its name
@@ -57,7 +57,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; path in this script (OutputDir, MessagesFile, [Files] Source, ...).
 SourceDir=..
 OutputDir=artifacts
-OutputBaseFilename=SystemAssistant-Setup-1.1.6
+OutputBaseFilename=Syspulse-Setup-1.2.0
 Compression=lzma2/max
 SolidCompression=yes
 ; Custom icon: used by setup.exe itself, the wizard title bar and the taskbar.
@@ -71,7 +71,7 @@ WizardStyle=modern
 DisableWelcomePage=no
 DisableDirPage=no
 DisableProgramGroupPage=yes
-DefaultGroupName=System Assistant
+DefaultGroupName=Syspulse
 DisableReadyPage=no
 ShowLanguageDialog=yes
 MinVersion=10.0
@@ -89,14 +89,14 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; The self-contained single-file build needs no .NET runtime on the target PC.
-Source: "artifacts\win-x64-self-contained\SystemAssistant.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "artifacts\win-x64-self-contained\Syspulse.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-; Start menu folder "System Assistant": main program + uninstall shortcuts.
-Name: "{group}\System Assistant";        Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\卸载 System Assistant";   Filename: "{uninstallexe}"
+; Start menu folder "Syspulse": main program + uninstall shortcuts.
+Name: "{group}\Syspulse";        Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\卸载 Syspulse";   Filename: "{uninstallexe}"
 ; Optional desktop shortcut (offered on the "Additional tasks" page).
-Name: "{autodesktop}\System Assistant";  Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\Syspulse";  Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 ; HKCU uninstall information (Windows 10/11 "Apps & features" reads HKCU for
@@ -114,7 +114,7 @@ Root: HKCU; Subkey: "{#MyUninstKey}"; ValueType: dword;  ValueName: "NoModify"; 
 Root: HKCU; Subkey: "{#MyUninstKey}"; ValueType: dword;  ValueName: "NoRepair";              ValueData: 1
 
 [Run]
-; "Launch System Assistant" checkbox on the finish page; never auto-runs in
+; "Launch Syspulse" checkbox on the finish page; never auto-runs in
 ; silent installs (important for unattended / CI deployments).
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
@@ -125,7 +125,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usUninstall) and (not UninstallSilent) then
     MsgBox('卸载只会移除程序文件、快捷方式与卸载信息。' + #13#10 + #13#10 +
-           '您的配置与日志保存在 ' + ExpandConstant('{localappdata}\SystemAssistant') +
+           '您的配置与日志保存在 ' + ExpandConstant('{localappdata}\Syspulse') +
            '，卸载时会完整保留，不会被删除。' + #13#10 +
            '如需彻底清理，请在卸载完成后手动删除该文件夹。',
            mbInformation, MB_OK);

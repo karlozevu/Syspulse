@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Publish System Assistant as a single-file portable build.
+  Publish Syspulse as a single-file portable build.
 
 .DESCRIPTION
   Default: framework-dependent single file (small, needs .NET 9 Desktop Runtime).
@@ -38,7 +38,7 @@ if ([string]::IsNullOrWhiteSpace($Output)) {
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " System Assistant - portable single-file publish" -ForegroundColor Cyan
+Write-Host " Syspulse - portable single-file publish" -ForegroundColor Cyan
 Write-Host " RID        : $Runtime" -ForegroundColor Cyan
 Write-Host " Mode       : $mode" -ForegroundColor Cyan
 Write-Host " Output     : $Output" -ForegroundColor Cyan
@@ -64,15 +64,15 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXIT
 # Write a short readme next to the exe (UTF-8, Chinese content for end users)
 $readme = Join-Path $Output "README-portable.txt"
 $lines = @(
-    "System Assistant 单文件绿色便携版",
+    "Syspulse 单文件绿色便携版",
     "生成时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
     "目标平台：$Runtime",
     "发布模式：$mode",
     "",
-    "【运行】直接双击 SystemAssistant.exe，无需安装。",
+    "【运行】直接双击 Syspulse.exe，无需安装。",
     "【权限】默认以普通用户权限启动；涉及服务、系统修复、注册表、HKLM 启动项等操作",
     "        需要管理员权限，界面上会提示并可在用户确认后以管理员身份重启。",
-    "【数据】配置、日志、备份保存在 %LOCALAPPDATA%\SystemAssistant，不写入系统目录。",
+    "【数据】配置、日志、备份保存在 %LOCALAPPDATA%\Syspulse，不写入系统目录。",
     "【隐私】程序默认不联网；更新检测仅在用户在设置页填写 URL 后才会发出一次 GET 请求，",
     "        且不会上传硬件信息、扫描结果或文件列表。"
 )

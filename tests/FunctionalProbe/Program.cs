@@ -1,4 +1,4 @@
-// System Assistant 只读功能探针（可复跑的回归测试，不修改系统）
+// Syspulse 只读功能探针（可复跑的回归测试，不修改系统）
 using System.Text;
 using System.Text.Json;
 using SystemAssistant.Models.Hardware;
@@ -47,7 +47,7 @@ Task TestSync(string name, Func<string> work) => Test(name, () => Task.FromResul
 var hub = ServiceHub.Instance;
 var temp = Path.Combine(Path.GetTempPath(), "sa-probe-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(temp);
-Emit($"# System Assistant 功能探针 {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+Emit($"# Syspulse 功能探针 {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
 Emit($"管理员权限: {PrivilegeHelper.IsAdministrator}");
 Emit($"临时目录: {temp}");
 Emit("");

@@ -8,7 +8,7 @@ internal static class Strings
 {
     public static IReadOnlyDictionary<string, string> ZhCn { get; } = new Dictionary<string, string>
     {
-        ["App_Title"] = "System Assistant · 系统助手",
+        ["App_Title"] = "Syspulse · 系统脉搏",
         ["Nav_Overview"] = "整机概览",
         ["Nav_Hardware"] = "硬件与监控",
         ["Nav_Cleaner"] = "安全垃圾清理",
@@ -364,7 +364,7 @@ internal static class Strings
 
     public static IReadOnlyDictionary<string, string> EnUs { get; } = new Dictionary<string, string>
     {
-        ["App_Title"] = "System Assistant",
+        ["App_Title"] = "Syspulse",
         ["Nav_Overview"] = "Overview",
         ["Nav_Hardware"] = "Hardware & Sensors",
         ["Nav_Cleaner"] = "Safe Cleanup",

@@ -4,11 +4,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.1.6</Version>
-    <Authors>System Assistant Contributors</Authors>
-    <Company>System Assistant</Company>
-    <Product>System Assistant</Product>
-    <Copyright>Copyright (c) 2026 System Assistant</Copyright>
+    <Version>1.2.0</Version>
+    <Authors>Syspulse Contributors</Authors>
+    <Company>Syspulse</Company>
+    <Product>Syspulse</Product>
+    <Copyright>Copyright (c) 2026 Syspulse</Copyright>
     <NeutralLanguage>zh-CN</NeutralLanguage>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- WMI / 注册表 / P-Invoke 属于 Windows 专用能力，已在项目级限定 net9.0-windows -->

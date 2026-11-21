@@ -1,4 +1,4 @@
-# System Assistant
+# Syspulse
 
 Windows 10 / 11 上的本机硬件监控、安全清理与系统维护工具。使用 **C# .NET 9 + Avalonia UI 11** 开发，采用严格分层的四项目解决方案，UI 与业务逻辑完全解耦。
 
@@ -11,8 +11,8 @@ Windows 10 / 11 上的本机硬件监控、安全清理与系统维护工具。�
 ## 1. 项目结构
 
 ```
-SystemAssistant/
-├── SystemAssistant.sln
+Syspulse/
+├── Syspulse.sln
 ├── Directory.Build.props           # 共享编译设置
 ├── NuGet.Config                    # NuGet 源（含国内镜像）
 ├── scripts/
@@ -20,14 +20,14 @@ SystemAssistant/
 │   ├── publish.ps1                 # 单文件绿色便携版发布脚本
 │   └── publish.cmd                 # 发布脚本的双击入口
 └── src/
-    ├── SystemAssistant.Models/     # 纯数据实体（net9.0，零 UI / 零平台依赖）
-    ├── SystemAssistant.Utils/      # 权限提升、文件操作、哈希、命令执行、
+    ├── Syspulse.Models/     # 纯数据实体（net9.0，零 UI / 零平台依赖）
+    ├── Syspulse.Utils/      # 权限提升、文件操作、哈希、命令执行、
     │                               # 注册表备份、JSON 持久化、导出、Win32 P/Invoke
-    ├── SystemAssistant.Core/       # 全部业务逻辑（完全不引用 Avalonia）
-    └── SystemAssistant.App/        # Avalonia UI：页面、ViewModel、弹窗、主题、多语言
+    ├── Syspulse.Core/       # 全部业务逻辑（完全不引用 Avalonia）
+    └── Syspulse.App/        # Avalonia UI：页面、ViewModel、弹窗、主题、多语言
 ```
 
-依赖方向严格单向：`App → Core → Utils → Models`。`Core` 中所有对外能力都通过 `Interfaces/ISystemAssistantServices.cs` 暴露，UI 只依赖接口；组合根是 `Core/Common/ServiceHub.cs`。**后续切换 WPF 时，只需重写 `App` 项目**，另外三层可原样复用（这正是备选方案要求保留的部分）。
+依赖方向严格单向：`App → Core → Utils → Models`。`Core` 中所有对外能力都通过 `Interfaces/ISyspulseServices.cs` 暴露，UI 只依赖接口；组合根是 `Core/Common/ServiceHub.cs`。**后续切换 WPF 时，只需重写 `App` 项目**，另外三层可原样复用（这正是备选方案要求保留的部分）。
 
 后台采集（`SensorMonitor`、`ProcessMonitor`）使用 `PeriodicTimer` + 独立 `Task`，通过事件把快照推给 UI；UI 层统一用 `Dispatcher.UIThread.Post` 切回界面线程，避免阻塞。
 
@@ -65,8 +65,8 @@ SystemAssistant/
 编译：
 
 ```bash
-dotnet restore SystemAssistant.sln
-dotnet build   SystemAssistant.sln -c Release
+dotnet restore Syspulse.sln
+dotnet build   Syspulse.sln -c Release
 ```
 
 或双击 `scripts/build.cmd`。
@@ -74,10 +74,10 @@ dotnet build   SystemAssistant.sln -c Release
 运行：
 
 ```bash
-dotnet run --project src/SystemAssistant.App/SystemAssistant.App.csproj
+dotnet run --project src/Syspulse.App/Syspulse.App.csproj
 ```
 
-或直接执行 `src/SystemAssistant.App/bin/Debug/net9.0-windows/SystemAssistant.exe`。
+或直接执行 `src/Syspulse.App/bin/Debug/net9.0-windows/Syspulse.exe`。
 
 ---
 
@@ -96,7 +96,7 @@ dotnet run --project src/SystemAssistant.App/SystemAssistant.App.csproj
 
 也可以双击 `scripts/publish.cmd`（默认框架依赖版；`publish.cmd -IncludeRuntime` 为自包含版）。
 
-输出位于 `artifacts/<rid>-<mode>/`，包含 `SystemAssistant.exe`、`README-portable.txt`，并自动生成同名 `.zip`。脚本启用了 `PublishSingleFile`、`IncludeNativeLibrariesForSelfExtract`、`IncludeAllContentForSelfExtract`（Avalonia / Skia / 硬件监控原生库必须一并打包），并去掉 pdb。绿色版不写注册表、不需要安装，配置与日志落在 `%LOCALAPPDATA%\SystemAssistant`。
+输出位于 `artifacts/<rid>-<mode>/`，包含 `Syspulse.exe`、`README-portable.txt`，并自动生成同名 `.zip`。脚本启用了 `PublishSingleFile`、`IncludeNativeLibrariesForSelfExtract`、`IncludeAllContentForSelfExtract`（Avalonia / Skia / 硬件监控原生库必须一并打包），并去掉 pdb。绿色版不写注册表、不需要安装，配置与日志落在 `%LOCALAPPDATA%\Syspulse`。
 
 ### 4.1 发布到 GitHub
 
@@ -118,7 +118,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 > `Resource not accessible by integration`），且往往只覆盖安装时选中的仓库，因此发布脚本
 > 使用一次性个人令牌；也可用 `git remote add origin` + `git push` 代替本脚本。
 
-可选参数：`--version`（Release 标签，默认取 `Directory.Build.props` 的 `<Version>`；指定新版本会创建独立 tag 与 Release，历史版本保留）、`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（产物目录）、`--message`（提交信息）。脚本会上传两个 zip 与 `SystemAssistant-Setup-<版本>.exe`，重复运行会更新同版本 Release 的正文并替换同名附件。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且**远端文件树与本地索引完全一致**（tree SHA 相同）。
+可选参数：`--version`（Release 标签，默认取 `Directory.Build.props` 的 `<Version>`；指定新版本会创建独立 tag 与 Release，历史版本保留）、`--owner`（默认取 token 所属账号）、`--token-file`、`--no-release`（只推源码）、`--artifacts`（产物目录）、`--message`（提交信息）。脚本会上传两个 zip 与 `Syspulse-Setup-<版本>.exe`，重复运行会更新同版本 Release 的正文并替换同名附件。Token 只在内存中使用，不写入日志；发布完成后建议撤销。脚本读取 `git ls-files` 的索引内容作为文件清单，因此 `.gitignore` 中的 `bin/`、`obj/`、`artifacts/`、`.github_token` 不会被上传，且**远端文件树与本地索引完全一致**（tree SHA 相同）。
 
 > 注意：如果仓库是先在 GitHub 网页手动创建并初始化了 README，远端会多出一个初始提交，与本地的提交历史不同（文件内容相同）。此时从本地直接 `git push` 会被判为非快进而拒绝；建议以远端为准重新 `clone`，或在确认无他人提交后使用 `git push --force-with-lease`。
 
@@ -212,7 +212,7 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 
 ## 8. Windows 安装程序（Inno Setup 6）
 
-成品：`artifacts/SystemAssistant-Setup-1.1.6.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/SystemAssistant.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
+成品：`artifacts/Syspulse-Setup-1.2.0.exe`（约 42 MB）。这是用 **Inno Setup 6** 编译的真正安装向导，双击即可运行；内部用 LZMA2 压缩打包了 `artifacts/win-x64-self-contained/Syspulse.exe` 自包含单文件版，目标机器**无需安装 .NET 运行时**。
 
 ### 8.1 运行要求与安装位置
 
@@ -220,26 +220,26 @@ python scripts/publish_github.py --repo System-Assistant --visibility public
 | --- | --- |
 | 系统 | Windows 10 / 11（64 位，`x64compatible`） |
 | 权限 | `PrivilegesRequired=lowest`，**不需要管理员权限、不会弹 UAC** |
-| 默认目录 | `%LOCALAPPDATA%\Programs\System Assistant`（Inno Setup 常量 `{userpf}`） |
-| 卸载注册表 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\System Assistant` |
-| 用户数据 | `%LOCALAPPDATA%\SystemAssistant`（配置 / 日志），**安装与卸载都不删除** |
+| 默认目录 | `%LOCALAPPDATA%\Programs\Syspulse`（Inno Setup 常量 `{userpf}`） |
+| 卸载注册表 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Syspulse` |
+| 用户数据 | `%LOCALAPPDATA%\Syspulse`（配置 / 日志），**安装与卸载都不删除** |
 
 ### 8.2 向导流程（默认简体中文，可切换 English）
 
-选择安装语言 → 欢迎 → 选择目标位置 → 选择附加任务（可选「创建桌面快捷方式」，默认不勾选）→ 准备安装 → 安装进度 → 完成（可选「运行 System Assistant」）。
+选择安装语言 → 欢迎 → 选择目标位置 → 选择附加任务（可选「创建桌面快捷方式」，默认不勾选）→ 准备安装 → 安装进度 → 完成（可选「运行 Syspulse」）。
 
-安装后会创建开始菜单文件夹 `System Assistant`，内含主程序快捷方式与「卸载 System Assistant」快捷方式；桌面快捷方式仅在勾选附加任务时创建。
+安装后会创建开始菜单文件夹 `Syspulse`，内含主程序快捷方式与「卸载 Syspulse」快捷方式；桌面快捷方式仅在勾选附加任务时创建。
 
-卸载信息由脚本的 `[Registry]` 写入 HKCU 的 `...\Uninstall\System Assistant`，包含 `DisplayName`、`DisplayVersion`、`Publisher`、`InstallLocation`、`DisplayIcon`、`UninstallString`（另有 `QuietUninstallString`、`URLInfoAbout`、`NoModify`、`NoRepair`）。卸载器 `unins000.exe` 随程序安装，可从开始菜单快捷方式或「应用和功能」启动，会删除安装文件、快捷方式与该注册表项；**不会触碰用户数据目录**，交互式卸载时还会弹窗说明数据将被保留。
+卸载信息由脚本的 `[Registry]` 写入 HKCU 的 `...\Uninstall\Syspulse`，包含 `DisplayName`、`DisplayVersion`、`Publisher`、`InstallLocation`、`DisplayIcon`、`UninstallString`（另有 `QuietUninstallString`、`URLInfoAbout`、`NoModify`、`NoRepair`）。卸载器 `unins000.exe` 随程序安装，可从开始菜单快捷方式或「应用和功能」启动，会删除安装文件、快捷方式与该注册表项；**不会触碰用户数据目录**，交互式卸载时还会弹窗说明数据将被保留。
 
-> 脚本刻意设置 `CreateUninstallRegKey=no` 并自行写注册表，以便卸载项名称严格等于 `System Assistant`（而不是 Inno Setup 默认的 `...\System Assistant_is1`）；卸载器仍会正常生成，且该键带 `uninsdeletekey`，卸载时自动清理。脚本中没有任何 `[InstallDelete]` / `[UninstallDelete]` 段，用户数据目录从未列入删除范围。
+> 脚本刻意设置 `CreateUninstallRegKey=no` 并自行写注册表，以便卸载项名称严格等于 `Syspulse`（而不是 Inno Setup 默认的 `...\Syspulse_is1`）；卸载器仍会正常生成，且该键带 `uninsdeletekey`，卸载时自动清理。脚本中没有任何 `[InstallDelete]` / `[UninstallDelete]` 段，用户数据目录从未列入删除范围。
 
 ### 8.3 静默安装 / 卸载
 
 ```bat
 :: 完全静默安装（无界面）
-SystemAssistant-Setup-1.1.6.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-  /DIR="%LOCALAPPDATA%\Programs\System Assistant" /LOG="%TEMP%\sa-install.log"
+Syspulse-Setup-1.2.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+  /DIR="%LOCALAPPDATA%\Programs\Syspulse" /LOG="%TEMP%\sa-install.log"
 
 :: 其他常用参数
 :: /SILENT                    隐藏向导页但保留进度条
@@ -248,7 +248,7 @@ SystemAssistant-Setup-1.1.6.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
 :: /NOCANCEL /CLOSEAPPLICATIONS
 
 :: 静默卸载
-"%LOCALAPPDATA%\Programs\System Assistant\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+"%LOCALAPPDATA%\Programs\Syspulse\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 ```
 
 静默安装不会自动启动程序（`[Run]` 带 `skipifsilent`），适合无人值守 / CI 部署。
@@ -256,17 +256,17 @@ SystemAssistant-Setup-1.1.6.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
 ### 8.4 从源码重建安装包
 
 ```bat
-cd /d <仓库根目录>\SystemAssistant
+cd /d <仓库根目录>\Syspulse
 scripts\build-installer.cmd
 ```
 
 构建脚本会自动定位编译器，优先使用工作区内的便携副本 `.tools\inno\ISCC.exe`（Inno Setup 6.7.3，未安装到系统），找不到时回退到本机已安装的 Inno Setup 6。相关源码：
 
-- `installer\SystemAssistant-Setup.iss` —— 安装 / 卸载 / 注册表 / 快捷方式主脚本
+- `installer\Syspulse-Setup.iss` —— 安装 / 卸载 / 注册表 / 快捷方式主脚本
 - `installer\ChineseSimplified.isl` —— 简体中文语言文件（Inno Setup 6.5.0+ 官方中文翻译，UTF-8 无 BOM）
 - `scripts\build-installer.cmd` —— 一键构建与产物校验
 
-重建前需先通过 `scripts\publish.ps1` 产出 `artifacts/win-x64-self-contained/SystemAssistant.exe`。
+重建前需先通过 `scripts\publish.ps1` 产出 `artifacts/win-x64-self-contained/Syspulse.exe`。
 
 ---
 
@@ -278,8 +278,8 @@ scripts\build-installer.cmd
 | --- | --- |
 | `scripts/make_icon.py` | 图标生成器，仅用 Python 标准库，可复现、无需设计软件 |
 | `installer/app-icon.svg` | 可编辑的矢量设计稿 |
-| `src/SystemAssistant.App/Assets/app.ico` | 9 种尺寸（16–256）的 ICO，用于 Win32 exe 与安装包 |
-| `src/SystemAssistant.App/Assets/app-icon.png` | 256×256 PNG，用于 Avalonia 窗口标题栏 / 任务栏 |
+| `src/Syspulse.App/Assets/app.ico` | 9 种尺寸（16–256）的 ICO，用于 Win32 exe 与安装包 |
+| `src/Syspulse.App/Assets/app-icon.png` | 256×256 PNG，用于 Avalonia 窗口标题栏 / 任务栏 |
 | `installer/app.ico` | ICO 副本，供 Inno Setup 的 `SetupIconFile` 使用 |
 
 重新生成只需执行 `python scripts/make_icon.py`。图标通过三处接入：`.csproj` 的 `ApplicationIcon`（exe）、`Services/AppIcon.cs` 与各窗口的 `Icon` 属性（Avalonia 窗口与对话框）、Inno Setup 的 `SetupIconFile`（安装包向导与 setup.exe）。改动图标后需依次重新 build、发布便携版、构建安装包。

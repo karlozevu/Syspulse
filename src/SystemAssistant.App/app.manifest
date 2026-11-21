@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.0.0" name="SystemAssistant.app" />
+  <assemblyIdentity version="1.0.0.0" name="Syspulse.app" />
   <!-- 默认以普通权限启动；需要管理员权限的操作由用户在界面上主动触发提升 -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>

@@ -27,6 +27,6 @@
 
     <Application.Styles>
         <FluentTheme />
-        <StyleInclude Source="avares://SystemAssistant/Styles/AppStyles.axaml" />
+        <StyleInclude Source="avares://Syspulse/Styles/AppStyles.axaml" />
     </Application.Styles>
 </Application>

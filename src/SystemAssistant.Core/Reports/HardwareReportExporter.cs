@@ -13,7 +13,7 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
     {
         var builder = new StringBuilder();
         builder.AppendLine("==========================================================");
-        builder.AppendLine("              System Assistant 整机硬件报告");
+        builder.AppendLine("              Syspulse 整机硬件报告");
         builder.AppendLine($"生成时间：{overview.GeneratedAt:yyyy-MM-dd HH:mm:ss}");
         builder.AppendLine("==========================================================");
         builder.AppendLine();
@@ -32,7 +32,7 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
     public string BuildMarkdown(SystemOverview overview)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("# System Assistant 整机硬件报告");
+        builder.AppendLine("# Syspulse 整机硬件报告");
         builder.AppendLine();
         builder.AppendLine($"> 生成时间：{overview.GeneratedAt:yyyy-MM-dd HH:mm:ss}  ");
         builder.AppendLine("> 本报告仅在本机生成，不会被上传。");
@@ -56,7 +56,7 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
         builder.AppendLine("<!DOCTYPE html>");
         builder.AppendLine("<html lang=\"zh-CN\"><head><meta charset=\"utf-8\" />");
         builder.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />");
-        builder.AppendLine("<title>System Assistant 整机硬件报告</title>");
+        builder.AppendLine("<title>Syspulse 整机硬件报告</title>");
         builder.AppendLine("<style>");
         builder.AppendLine("body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;background:#f6f8fa;color:#1f2328;margin:0;padding:32px}");
         builder.AppendLine(".wrap{max-width:980px;margin:auto;background:#fff;border:1px solid #d8dee4;border-radius:10px;padding:32px}");
@@ -68,7 +68,7 @@ public sealed class HardwareReportExporter : IHardwareReportExporter
         builder.AppendLine(".warn{color:#bf8700;font-weight:600}.bad{color:#cf222e;font-weight:600}.ok{color:#1a7f37}");
         builder.AppendLine("footer{margin-top:28px;color:#656d76;font-size:12px}");
         builder.AppendLine("</style></head><body><div class=\"wrap\">");
-        builder.AppendLine("<h1>System Assistant 整机硬件报告</h1>");
+        builder.AppendLine("<h1>Syspulse 整机硬件报告</h1>");
         builder.AppendLine($"<div class=\"meta\">生成时间：{overview.GeneratedAt:yyyy-MM-dd HH:mm:ss} · 仅在本机生成，不会上传</div>");
 
         foreach (var section in BuildSections(overview))

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Generate the System Assistant application icon with the Python standard library only.
+Generate the Syspulse application icon with the Python standard library only.
 
 Design
 ------
-A rounded blue tile (the same accent blue as the UI) carrying a rising white
-monitoring curve, a soft area fill, a baseline grid line and a highlighted end
-point with a halo. It stays readable down to 16x16 because it uses a single
-bold gesture instead of fine detail.
+A dark glass tile carrying a neon-teal ECG / heartbeat pulse, faint HUD grid
+lines and a glowing peak. The pulse is the whole identity: a flat baseline,
+a small P wave, a tall R spike, a deep S dip and a T wave — the universally
+recognised "heartbeat" gesture. Neon teal on deep navy reads as both a
+terminal/HUD and a health monitor, and stays legible at 16x16 because the
+small sizes keep only the bold pulse while the grid fades into the glass.
 
 Outputs
 -------
@@ -29,14 +31,37 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "src" / "SystemAssistant.App" / "Assets"
 INSTALLER = ROOT / "installer"
 
-# Brand gradient: bright accent blue -> deep blue
-TOP_LEFT = (0x21, 0x88, 0xE0)
-BOTTOM_RIGHT = (0x0A, 0x4A, 0x8E)
+# Deep glass tile: near-black navy -> slightly lighter navy.
+TILE_TOP_LEFT = (0x13, 0x24, 0x3E)
+TILE_BOTTOM_RIGHT = (0x07, 0x10, 0x1F)
 
-# The rising "monitoring" polyline, in normalized [0,1] coordinates (y grows down)
-POINTS = [(0.16, 0.70), (0.34, 0.56), (0.50, 0.62), (0.68, 0.38), (0.85, 0.30)]
-LINE_WIDTH = 0.085
-BASELINE = 0.815
+# Neon teal pulse and its bright core.
+PULSE = (0x3D, 0xF5, 0xC0)
+PULSE_BRIGHT = (0xC8, 0xFF, 0xEE)
+
+# ECG waveform in normalized [0,1] coordinates (y grows down).
+# baseline -> P wave -> Q dip -> R spike -> S dip -> baseline -> T wave -> baseline.
+PULSE_POINTS = [
+    (0.10, 0.56),
+    (0.28, 0.56),
+    (0.34, 0.48),
+    (0.40, 0.56),
+    (0.45, 0.64),
+    (0.52, 0.23),
+    (0.59, 0.69),
+    (0.65, 0.56),
+    (0.73, 0.47),
+    (0.82, 0.56),
+    (0.93, 0.56),
+]
+PEAK = PULSE_POINTS[5]
+LINE_WIDTH = 0.076
+
+# Faint HUD grid lines (fractions of the tile).
+GRID_X = (0.26, 0.5, 0.74)
+GRID_Y = (0.31, 0.56, 0.81)
+GRID_ALPHA = 0.085
+
 TILE_HALF = 0.455
 TILE_RADIUS = 0.205
 SIZES = (16, 24, 32, 40, 48, 64, 96, 128, 256)
@@ -48,7 +73,7 @@ def clamp(value: float) -> float:
 
 
 def blend(dst, rgb, alpha):
-    """Alpha-composite an opaque colour over a premultiplied-free RGBA tuple."""
+    """Alpha-composite an opaque colour over an RGBA tuple."""
     if alpha <= 0:
         return dst
     r, g, b, a = dst
@@ -64,15 +89,6 @@ def distance_to_segment(px, py, ax, ay, bx, by) -> float:
     length_sq = vx * vx + vy * vy
     t = clamp((wx * vx + wy * vy) / length_sq) if length_sq else 0.0
     return math.hypot(px - (ax + t * vx), py - (ay + t * vy))
-
-
-def curve_y(u: float):
-    """Interpolated y of the polyline at x=u, or None outside its span."""
-    for (x0, y0), (x1, y1) in zip(POINTS, POINTS[1:]):
-        if x0 <= u <= x1:
-            t = (u - x0) / (x1 - x0) if x1 != x0 else 0.0
-            return y0 + (y1 - y0) * t
-    return None
 
 
 def png_chunk(tag: bytes, payload: bytes) -> bytes:
@@ -100,7 +116,7 @@ def render(size: int) -> bytes:
         for i in range(size):
             u = (i + 0.5) / size
 
-            # Rounded-rectangle signed distance field
+            # Rounded-rectangle signed distance field (the glass tile)
             px, py = u - 0.5, v - 0.5
             inner = TILE_HALF - TILE_RADIUS
             qx, qy = abs(px) - inner, abs(py) - inner
@@ -110,38 +126,37 @@ def render(size: int) -> bytes:
                 row += b"\x00\x00\x00\x00"
                 continue
 
-            # Diagonal gradient
+            # Diagonal navy gradient
             t = 0.5 * u + 0.5 * v
-            colour = tuple(TOP_LEFT[k] + (BOTTOM_RIGHT[k] - TOP_LEFT[k]) * t for k in range(3))
+            colour = tuple(TILE_TOP_LEFT[k] + (TILE_BOTTOM_RIGHT[k] - TILE_TOP_LEFT[k]) * t
+                           for k in range(3))
             pixel = (colour[0], colour[1], colour[2], alpha)
 
-            # Soft top highlight + thin bright rim give the tile some depth
-            pixel = blend(pixel, white, 0.11 * max(0.0, 1.0 - v / 0.62) * alpha)
+            # Subtle top glass highlight + thin teal rim
+            pixel = blend(pixel, white, 0.07 * max(0.0, 1.0 - v / 0.60) * alpha)
             rim = clamp(0.5 - (abs(sd + 0.010) - 0.006) / edge)
-            pixel = blend(pixel, white, 0.22 * rim * alpha)
+            pixel = blend(pixel, PULSE, 0.28 * rim * alpha)
 
-            # Translucent area under the curve
-            y = curve_y(u)
-            if y is not None and y < v < BASELINE:
-                pixel = blend(pixel, white, 0.20 * clamp((v - y) / 0.35) * alpha)
+            # HUD grid: faint teal-white lines, anti-aliased
+            grid = 0.0
+            for gx in GRID_X:
+                grid = max(grid, clamp(0.5 - (abs(u - gx) - 0.0016) / edge))
+            for gy in GRID_Y:
+                grid = max(grid, clamp(0.5 - (abs(v - gy) - 0.0016) / edge))
+            pixel = blend(pixel, PULSE, GRID_ALPHA * grid * alpha)
 
-            # Baseline grid line
-            if 0.14 < u < 0.88 and BASELINE - 0.008 < v < BASELINE + 0.008:
-                pixel = blend(pixel, white, 0.32 * alpha)
-
-            # The curve itself (round caps via segment distance field)
-            distance = min(distance_to_segment(u, v, *POINTS[k], *POINTS[k + 1])
-                           for k in range(len(POINTS) - 1))
+            # The ECG pulse: round-capped segments via distance field
+            distance = min(distance_to_segment(u, v, *PULSE_POINTS[k], *PULSE_POINTS[k + 1])
+                           for k in range(len(PULSE_POINTS) - 1))
             line_alpha = clamp(0.5 + (LINE_WIDTH / 2 - distance) / edge)
-            pixel = blend(pixel, white, 0.97 * line_alpha * alpha)
+            pixel = blend(pixel, PULSE, 0.98 * line_alpha * alpha)
 
-            # Highlighted end point + halo
-            end_x, end_y = POINTS[-1]
-            d = math.hypot(u - end_x, v - end_y)
-            dot = clamp(0.5 + (0.058 - d) / edge)
-            pixel = blend(pixel, white, 0.98 * dot * alpha)
-            ring = clamp(0.5 - (abs(d - 0.105) - 0.009) / edge)
-            pixel = blend(pixel, white, 0.30 * ring * alpha)
+            # Glowing peak: bright core + teal halo at the R spike
+            d = math.hypot(u - PEAK[0], v - PEAK[1])
+            core = clamp(0.5 + (0.020 - d) / edge)
+            pixel = blend(pixel, PULSE_BRIGHT, 0.95 * core * alpha)
+            halo = clamp(0.5 - (abs(d - 0.046) - 0.018) / edge)
+            pixel = blend(pixel, PULSE, 0.30 * halo * alpha)
 
             row += bytes((int(max(0, min(255, round(pixel[0])))),
                           int(max(0, min(255, round(pixel[1])))),
@@ -169,22 +184,27 @@ def build_ico(images: list[tuple[int, bytes]]) -> bytes:
 SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2188E0"/>
-      <stop offset="1" stop-color="#0A4A8E"/>
+      <stop offset="0" stop-color="#13243E"/>
+      <stop offset="1" stop-color="#07101F"/>
     </linearGradient>
-    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity=".26"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity=".04"/>
-    </linearGradient>
+    <clipPath id="tile">
+      <rect x="11" y="11" width="234" height="234" rx="52"/>
+    </clipPath>
   </defs>
   <rect x="11" y="11" width="234" height="234" rx="52" fill="url(#bg)"/>
-  <rect x="11" y="11" width="234" height="234" rx="52" fill="none" stroke="#FFFFFF" stroke-opacity=".22" stroke-width="3"/>
-  <path d="M41 179 L87 143 L128 159 L174 97 L218 77 L218 209 L41 209 Z" fill="url(#area)"/>
-  <line x1="36" y1="209" x2="224" y2="209" stroke="#FFFFFF" stroke-opacity=".35" stroke-width="4" stroke-linecap="round"/>
-  <polyline points="41,179 87,143 128,159 174,97 218,77" fill="none" stroke="#FFFFFF"
-            stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="218" cy="77" r="27" fill="none" stroke="#FFFFFF" stroke-opacity=".35" stroke-width="4"/>
-  <circle cx="218" cy="77" r="15" fill="#FFFFFF"/>
+  <g clip-path="url(#tile)" stroke="#3DF5C0" stroke-opacity=".09" stroke-width="2">
+    <line x1="77" y1="11" x2="77" y2="245"/>
+    <line x1="128" y1="11" x2="128" y2="245"/>
+    <line x1="179" y1="11" x2="179" y2="245"/>
+    <line x1="11" y1="79" x2="245" y2="79"/>
+    <line x1="11" y1="143" x2="245" y2="143"/>
+    <line x1="11" y1="207" x2="245" y2="207"/>
+  </g>
+  <rect x="11" y="11" width="234" height="234" rx="52" fill="none" stroke="#3DF5C0" stroke-opacity=".28" stroke-width="3"/>
+  <polyline points="26,143 72,143 87,123 102,143 115,164 133,59 151,177 166,143 187,120 210,143 238,143"
+            fill="none" stroke="#3DF5C0" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="133" cy="59" r="15" fill="none" stroke="#3DF5C0" stroke-opacity=".35" stroke-width="3"/>
+  <circle cx="133" cy="59" r="6" fill="#C8FFEE"/>
 </svg>
 """
 

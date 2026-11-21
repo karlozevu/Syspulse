@@ -81,7 +81,7 @@ public static class RegistryBackupHelper
 
         var manifest = Path.Combine(directory, "RESTORE_README.txt");
         var builder = new StringBuilder();
-        builder.AppendLine("System Assistant 注册表备份");
+        builder.AppendLine("Syspulse 注册表备份");
         builder.AppendLine("生成时间：" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
         builder.AppendLine();
         builder.AppendLine("如需还原，请以管理员身份打开命令提示符，逐个执行：");

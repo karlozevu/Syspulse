@@ -1,4 +1,4 @@
-# System Assistant 全功能测试与修复报告
+# Syspulse 全功能测试与修复报告
 
 测试日期：2026-11-15 · 环境：Windows 11 专业版、.NET 9、**非管理员进程**
 

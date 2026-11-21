@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows</TargetFramework>
     <RootNamespace>SystemAssistant.App</RootNamespace>
-    <AssemblyName>SystemAssistant</AssemblyName>
+    <AssemblyName>Syspulse</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Win32 exe 图标（资源管理器、任务栏、快捷方式都会使用它） -->
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>

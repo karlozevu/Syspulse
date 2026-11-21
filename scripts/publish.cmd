@@ -1,5 +1,5 @@
 @echo off
-REM System Assistant portable single-file publish entry point (double-click).
+REM Syspulse portable single-file publish entry point (double-click).
 REM   Default          : framework-dependent (requires .NET 9 Desktop Runtime)
 REM   -IncludeRuntime  : self-contained (no runtime required on target PC)
 setlocal

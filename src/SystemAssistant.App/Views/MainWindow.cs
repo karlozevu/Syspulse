@@ -91,7 +91,7 @@ public sealed class MainWindow : Window
             }
         });
         var brandText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
-        brandText.Children.Add(new TextBlock { Text = "System Assistant", FontSize = 14,
+        brandText.Children.Add(new TextBlock { Text = "Syspulse", FontSize = 14,
             FontWeight = FontWeight.SemiBold });
         brandText.Children.Add(new TextBlock { Text = "v" + ServiceHub.Instance.Update.CurrentVersion,
             FontSize = 11, Classes = { "caption" } });

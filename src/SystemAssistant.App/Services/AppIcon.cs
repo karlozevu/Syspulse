@@ -21,7 +21,7 @@ public static class AppIcon
         _attempted = true;
         try
         {
-            var uri = new Uri("avares://SystemAssistant/Assets/app-icon.png");
+            var uri = new Uri("avares://Syspulse/Assets/app-icon.png");
             using var stream = AssetLoader.Open(uri);
             _cached = new WindowIcon(stream);
         }

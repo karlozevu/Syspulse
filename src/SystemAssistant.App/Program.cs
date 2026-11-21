@@ -40,7 +40,7 @@ internal static class Program
 
     private static void ShowAlreadyRunning()
     {
-        try { MessageBoxW(IntPtr.Zero, "System Assistant 已在运行，请切换到已打开的窗口。", "System Assistant", 0x40); }
+        try { MessageBoxW(IntPtr.Zero, "Syspulse 已在运行，请切换到已打开的窗口。", "Syspulse", 0x40); }
         catch { /* 无 UI 环境下静默退出即可 */ }
     }
 

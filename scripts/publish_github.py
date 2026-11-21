@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Publish System Assistant to GitHub via the REST API (no `git push` required).
+Publish Syspulse to GitHub via the REST API (no `git push` required).
 
 Why API instead of git push:
   Some corporate proxies reject the CONNECT tunnel used by libcurl inside Git
@@ -44,7 +44,7 @@ from pathlib import Path
 
 API = "https://api.github.com"
 UPLOADS = "https://uploads.github.com"
-USER_AGENT = "SystemAssistant-Publisher/1.0"
+USER_AGENT = "Syspulse-Publisher/1.0"
 
 
 class GitHub:
@@ -102,7 +102,7 @@ def read_project_version(root: Path) -> str:
                           props.read_text(encoding="utf-8"))
         if match:
             return match.group(1).strip()
-    return "1.1.6"
+    return "1.2.0"
 
 
 def read_tracked_files(root: Path):
@@ -190,8 +190,8 @@ def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path,
                    branch: str, root: Path, version: str):
     """Create or update the release for `version`. Idempotent: safe after a rebuild."""
     tag = f"v{version}"
-    setup_name = f"SystemAssistant-Setup-{version}.exe"
-    title = f"System Assistant {tag}"
+    setup_name = f"Syspulse-Setup-{version}.exe"
+    title = f"Syspulse {tag}"
 
     changelog = root / "CHANGELOG.md"
     notes = changelog.read_text(encoding="utf-8") if changelog.exists() else title
@@ -260,7 +260,7 @@ def create_release(gh: GitHub, owner: str, repo: str, artifacts: Path,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Publish System Assistant to GitHub")
+    parser = argparse.ArgumentParser(description="Publish Syspulse to GitHub")
     parser.add_argument("--token", default=os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
     parser.add_argument("--token-file", default="",
                         help="Read the token from a local file instead of the environment "
