@@ -39,4 +39,29 @@ public static class AppIcon
         var icon = Get();
         if (icon is not null) window.Icon = icon;
     }
+
+    /// <summary>
+    /// 取侧栏/界面内使用的图标 Image。与窗口图标同源，
+    /// 避免侧栏仍显示旧的 "SA" 文字块造成品牌断裂。加载失败返回 null。
+    /// </summary>
+    public static Image? GetImage()
+    {
+        try
+        {
+            var uri = new Uri("avares://Syspulse/Assets/app-icon.png");
+            using var stream = AssetLoader.Open(uri);
+            return new Image
+            {
+                Source = new Avalonia.Media.Imaging.Bitmap(stream),
+                Width = 34,
+                Height = 34,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+            };
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 }

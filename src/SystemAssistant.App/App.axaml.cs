@@ -2,6 +2,7 @@ using System.IO;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
 using SystemAssistant.App.Views;
 using SystemAssistant.Core.Common;
@@ -50,7 +51,17 @@ public partial class App : Application
             // 全局服务单例跟随进程生命周期：仅在应用真正退出时释放一次。
             // 不能在 MainWindow.OnClosed 里释放——悬浮仪表盘可独立存在并把主窗口重新显示，
             // 那时单例已死会导致服务不可恢复。
-            desktop.ShutdownRequested += (_, _) => ServiceHub.Instance.Dispose();
+            // 关键：ShutdownRequested 也可能在"退出被取消"时触发（主窗口 OnClosing 因悬浮窗
+            // 可见而 Cancel → Hide，进程继续）。此时若立即 Dispose，服务全死但进程还活着，
+            // 悬浮窗与主窗口的数据上下文都失效。因此延迟一个 UI 周期再确认：
+            // 若仍有可见窗口说明退出被取消，跳过释放；进程真退出时由 OS 回收资源。
+            desktop.ShutdownRequested += (_, _) =>
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (desktop.MainWindow?.IsVisible == true) return; // 退出被取消，窗口还活着
+                    if (FloatingDashboardWindow.Current is { IsVisible: true }) return;
+                    ServiceHub.Instance.Dispose();
+                }, DispatcherPriority.Background);
         }
 
         base.OnFrameworkInitializationCompleted();

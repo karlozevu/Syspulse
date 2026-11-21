@@ -23,6 +23,10 @@ public sealed class SettingsViewModel : ViewModelBase
     private string _updateUrl = string.Empty;
     private string _updateMessage = string.Empty;
     private SystemAssistant.Models.Common.AppVersionInfo? _lastUpdateInfo;
+    // 是否有尚未保存的文本编辑。顶栏切主题/语言会触发 Settings.Changed，
+    // 若此时无条件重载文本字段，用户正在输入的内容会瞬间消失（BUG-1）。
+    private bool _textDirty;
+    private bool _suppressDirty; // 内部从配置回填时置位，避免把回填误判为用户编辑
 
     public SettingsViewModel()
     {
@@ -31,7 +35,7 @@ public sealed class SettingsViewModel : ViewModelBase
         _languageIndex = (int)settings.Language;
         _refreshIntervalMs = settings.ClampRefreshInterval();
         _temperatureThreshold = settings.Thresholds.FirstOrDefault(t => t.Kind == SensorKind.Temperature)?.MaxValue ?? 85;
-        ReloadTextFields();
+        ReloadTextFields(force: true);
 
         SaveCommand = CreateSyncCommand(Save);
         BrowseExportCommand = CreateCommand(BrowseExportAsync);
@@ -58,11 +62,17 @@ public sealed class SettingsViewModel : ViewModelBase
         set => Set(ref _temperatureThreshold,
             double.IsFinite(value) ? Math.Clamp(value, 30, 120) : 85);
     }
-    public string ExportPath { get => _exportPath; set => Set(ref _exportPath, value); }
-    public string BackupPath { get => _backupPath; set => Set(ref _backupPath, value); }
-    public string WhitelistText { get => _whitelistText; set => Set(ref _whitelistText, value); }
-    public string CustomPathsText { get => _customPathsText; set => Set(ref _customPathsText, value); }
-    public string UpdateUrl { get => _updateUrl; set => Set(ref _updateUrl, value); }
+    public string ExportPath { get => _exportPath; set => SetText(ref _exportPath, value); }
+    public string BackupPath { get => _backupPath; set => SetText(ref _backupPath, value); }
+    public string WhitelistText { get => _whitelistText; set => SetText(ref _whitelistText, value); }
+    public string CustomPathsText { get => _customPathsText; set => SetText(ref _customPathsText, value); }
+    public string UpdateUrl { get => _updateUrl; set => SetText(ref _updateUrl, value); }
+
+    private bool SetText(ref string field, string value)
+    {
+        if (!_suppressDirty) _textDirty = true;
+        return Set(ref field, value);
+    }
     public string UpdateMessage { get => _updateMessage; private set => Set(ref _updateMessage, value); }
 
     private void Save()
@@ -96,6 +106,9 @@ public sealed class SettingsViewModel : ViewModelBase
         Services.ApplyRuntimeSettings();
         ThemeService.Apply(theme);
         LocalizationService.Instance.SetLanguage(language);
+        // 保存成功后清除 dirty 并强制回填，确保文本框与磁盘一致
+        _textDirty = false;
+        ReloadTextFields(force: true);
         Services.OperationLog.Log(Models.Common.OperationType.Settings, "保存用户设置",
             $"{L("Settings_Interval")}={RefreshIntervalMs}；白名单 {whitelist.Length} 条", true);
         StatusMessage = L("Settings_Saved");
@@ -128,8 +141,10 @@ public sealed class SettingsViewModel : ViewModelBase
     /// 从共享设置重新加载文本字段（主题 / 语言 / 间隔 / 阈值等数值项不重载，
     /// 以免覆盖用户尚未保存的编辑）；值相同则不更新，避免自己保存触发的回环。
     /// </summary>
-    private bool ReloadTextFields()
+    private bool ReloadTextFields(bool force = false)
     {
+        // 有未保存的编辑时不回填，除非调用方明确要求（构造 / 保存后）。
+        if (_textDirty && !force) return false;
         var settings = Services.Settings.Current;
         var exportPath = settings.DefaultExportDirectory;
         var backupPath = settings.RegistryBackupDirectory;
@@ -137,11 +152,16 @@ public sealed class SettingsViewModel : ViewModelBase
         var whitelist = string.Join(Environment.NewLine, settings.Whitelist.Select(r => r.Pattern));
         var customPaths = string.Join(Environment.NewLine, settings.CustomScanPaths);
         var changed = false;
-        if (!string.Equals(_exportPath, exportPath, StringComparison.Ordinal)) { _exportPath = exportPath; changed = true; }
-        if (!string.Equals(_backupPath, backupPath, StringComparison.Ordinal)) { _backupPath = backupPath; changed = true; }
-        if (!string.Equals(_updateUrl, updateUrl, StringComparison.Ordinal)) { _updateUrl = updateUrl; changed = true; }
-        if (!string.Equals(_whitelistText, whitelist, StringComparison.Ordinal)) { _whitelistText = whitelist; changed = true; }
-        if (!string.Equals(_customPathsText, customPaths, StringComparison.Ordinal)) { _customPathsText = customPaths; changed = true; }
+        _suppressDirty = true;
+        try
+        {
+            if (!string.Equals(_exportPath, exportPath, StringComparison.Ordinal)) { _exportPath = exportPath; changed = true; }
+            if (!string.Equals(_backupPath, backupPath, StringComparison.Ordinal)) { _backupPath = backupPath; changed = true; }
+            if (!string.Equals(_updateUrl, updateUrl, StringComparison.Ordinal)) { _updateUrl = updateUrl; changed = true; }
+            if (!string.Equals(_whitelistText, whitelist, StringComparison.Ordinal)) { _whitelistText = whitelist; changed = true; }
+            if (!string.Equals(_customPathsText, customPaths, StringComparison.Ordinal)) { _customPathsText = customPaths; changed = true; }
+        }
+        finally { _suppressDirty = false; }
         return changed;
     }
 

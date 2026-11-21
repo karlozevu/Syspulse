@@ -78,18 +78,28 @@ public sealed class MainWindow : Window
 
         var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10,
             Margin = new Thickness(6, 0, 0, 18) };
-        brand.Children.Add(new Border
+        // 侧栏品牌优先用真实心电图标，与窗口/任务栏/安装包保持一致；
+        // 图标资源加载失败时回退到旧的 SA 文字块，不影响界面可用性。
+        var brandIcon = AppIcon.GetImage();
+        if (brandIcon is not null)
         {
-            Width = 34, Height = 34, CornerRadius = new CornerRadius(9),
-            Background = ThemeService.Brush("SaAccentBrush"),
-            Child = new TextBlock
+            brand.Children.Add(brandIcon);
+        }
+        else
+        {
+            brand.Children.Add(new Border
             {
-                Text = "SA", Foreground = Brushes.White, FontSize = 13,
-                FontWeight = FontWeight.SemiBold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            }
-        });
+                Width = 34, Height = 34, CornerRadius = new CornerRadius(9),
+                Background = ThemeService.Brush("SaAccentBrush"),
+                Child = new TextBlock
+                {
+                    Text = "SA", Foreground = Brushes.White, FontSize = 13,
+                    FontWeight = FontWeight.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            });
+        }
         var brandText = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
         brandText.Children.Add(new TextBlock { Text = "Syspulse", FontSize = 14,
             FontWeight = FontWeight.SemiBold });

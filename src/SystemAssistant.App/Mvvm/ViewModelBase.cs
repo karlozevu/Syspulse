@@ -9,6 +9,7 @@ namespace SystemAssistant.App.Mvvm;
 public abstract class ViewModelBase : ObservableObject, IDisposable
 {
     private bool _isBusy;
+    private int _busyCount; // 并发任务计数：先完成者不能提前清除 IsBusy
     private string _statusMessage = string.Empty;
     private bool _disposed;
     private readonly List<AsyncRelayCommand> _commands = new();
@@ -103,11 +104,17 @@ public abstract class ViewModelBase : ObservableObject, IDisposable
     protected async Task RunBusyAsync(Func<Task> work, string? startMessage = null)
     {
         if (startMessage is not null) StatusMessage = startMessage;
+        // 引用计数：多个并发任务（如优化页同时加载启动项/服务/磁盘）中先完成者
+        // 不能把 IsBusy 提前清零，必须等所有任务都结束。
+        Interlocked.Increment(ref _busyCount);
         IsBusy = true;
         try { await work(); }
         catch (OperationCanceledException) { StatusMessage = L("Status_Cancelled"); }
         catch (Exception ex) { StatusMessage = L("Message_ErrorPrefix") + ex.Message; }
-        finally { IsBusy = false; }
+        finally
+        {
+            if (Interlocked.Decrement(ref _busyCount) == 0) IsBusy = false;
+        }
     }
 
     private void OnLanguageChangedHandler(object? sender, EventArgs e)

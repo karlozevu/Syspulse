@@ -15,8 +15,13 @@ public sealed class HealthViewModel : ViewModelBase
     private string _healthSummary = string.Empty;
     private bool _isChecking;
     private string _networkStatus = string.Empty;
+    private string _networkStatusKey = string.Empty; // 缓存状态 key，切语言时据此重建文案
     private string _networkSpeed = string.Empty;
     private IReadOnlyList<NetworkSample> _samples = Array.Empty<NetworkSample>();
+    // 缓存原始报告与告警，切语言时只重新本地化文本，不重跑昂贵的体检 / 不重复读盘。
+    private HealthReport? _lastReport;
+    private readonly List<AlertHistoryEntry> _lastAlerts = new();
+    private bool _allGoodPlaceholder;
 
     public HealthViewModel()
     {
@@ -64,50 +69,68 @@ public sealed class HealthViewModel : ViewModelBase
             try
             {
                 var report = await Services.HealthCheck.RunAsync();
+                _lastReport = report;
                 ScoreText = report.Score.ToString(CultureInfo.InvariantCulture);
                 ScoreDetail = ScoreLabel(report.Score);
-                var parts = new List<string>
-                {
-                    LF("Health_CpuUsage", report.CpuUsagePercent.ToString("F1", CultureInfo.InvariantCulture)),
-                    LF("Health_MemUsage", report.MemoryUsagePercent.ToString("F1", CultureInfo.InvariantCulture))
-                };
-                if (report.CpuTemperature is { } t)
-                    parts.Add(LF("Health_CpuTemp", t.ToString("F0", CultureInfo.InvariantCulture)));
-                parts.Add(LF("Health_Sensors", report.SensorCount.ToString(CultureInfo.InvariantCulture)));
-                HealthSummary = string.Join("  ·  ", parts);
+                RefreshHealthText();
 
                 Issues.Clear();
-                foreach (var issue in report.Issues)
+                _allGoodPlaceholder = report.Issues.Count == 0;
+                if (_allGoodPlaceholder)
                 {
-                    issue.Message = string.IsNullOrEmpty(issue.MessageArg)
-                        ? L(issue.MessageKey)
-                        : LF(issue.MessageKey, issue.MessageArg);
-                    Issues.Add(new HealthIssueVm
-                    {
-                        SeverityText = SeverityLabel(issue.Severity),
-                        Category = issue.Category,
-                        Message = issue.Message,
-                        IsWarning = issue.Severity != HealthSeverity.Info
-                    });
+                    Issues.Add(new HealthIssueVm { SeverityKey = "Health_AllGood", Category = string.Empty, MessageKey = "Health_NoIssues" });
                 }
-                if (Issues.Count == 0)
-                    Issues.Add(new HealthIssueVm
+                else
+                {
+                    foreach (var issue in report.Issues)
                     {
-                        SeverityText = L("Health_AllGood"),
-                        Category = string.Empty,
-                        Message = L("Health_NoIssues"),
-                        IsWarning = false
-                    });
+                        Issues.Add(new HealthIssueVm
+                        {
+                            SeverityKey = SeverityKey(issue.Severity),
+                            Category = issue.Category,
+                            MessageKey = issue.MessageKey,
+                            MessageArg = issue.MessageArg,
+                            IsWarning = issue.Severity != HealthSeverity.Info
+                        });
+                    }
+                }
+                ApplyIssueText();
                 StatusMessage = L("Status_Done");
             }
             finally { IsChecking = false; }
         }, L("Health_Check"));
     }
 
+    /// <summary>用当前报告重建顶部摘要（体检数值本身不变，只换本地化文案）。</summary>
+    private void RefreshHealthText()
+    {
+        var report = _lastReport;
+        if (report is null) return;
+        var parts = new List<string>
+        {
+            LF("Health_CpuUsage", report.CpuUsagePercent.ToString("F1", CultureInfo.InvariantCulture)),
+            LF("Health_MemUsage", report.MemoryUsagePercent.ToString("F1", CultureInfo.InvariantCulture))
+        };
+        if (report.CpuTemperature is { } t)
+            parts.Add(LF("Health_CpuTemp", t.ToString("F0", CultureInfo.InvariantCulture)));
+        parts.Add(LF("Health_Sensors", report.SensorCount.ToString(CultureInfo.InvariantCulture)));
+        HealthSummary = string.Join("  ·  ", parts);
+        ScoreDetail = ScoreLabel(report.Score);
+    }
+
     private void RefreshAlerts()
     {
+        // 只在真正需要刷新时读盘：切语言不应重复读取（避免额外的 IO 与状态抖动）。
+        _lastAlerts.Clear();
+        _lastAlerts.AddRange(Services.AlertHistory.GetAll());
+        ApplyAlertText();
+    }
+
+    /// <summary>用缓存的原始告警重建展示文本（不读盘）。</summary>
+    private void ApplyAlertText()
+    {
         Alerts.Clear();
-        foreach (var a in Services.AlertHistory.GetAll().AsEnumerable().Reverse().Take(100))
+        foreach (var a in _lastAlerts.AsEnumerable().Reverse().Take(100))
         {
             Alerts.Add(new AlertHistoryVm
             {
@@ -120,9 +143,20 @@ public sealed class HealthViewModel : ViewModelBase
         RefreshAlertsRequested?.Invoke();
     }
 
+    /// <summary>就地更新已有问题项文案（保留集合对象，ItemsControl 不需重建）。</summary>
+    private void ApplyIssueText()
+    {
+        foreach (var vm in Issues)
+        {
+            vm.SeverityText = vm.SeverityKey == "Health_AllGood" ? L(vm.SeverityKey) : SeverityGlyph(vm.SeverityKey);
+            vm.Message = string.IsNullOrEmpty(vm.MessageArg) ? L(vm.MessageKey) : LF(vm.MessageKey, vm.MessageArg);
+        }
+    }
+
     private void ClearAlerts()
     {
         Services.AlertHistory.Clear();
+        _lastAlerts.Clear();
         Alerts.Clear();
         RefreshAlertsRequested?.Invoke();
         StatusMessage = L("Status_Done");
@@ -133,18 +167,24 @@ public sealed class HealthViewModel : ViewModelBase
         if (Services.NetworkMonitor.IsRunning)
         {
             Services.NetworkMonitor.Stop();
-            NetworkStatus = L("Health_NetworkStopped");
+            SetNetworkStatus("Health_NetworkStopped");
             NetworkSpeed = string.Empty;
             _samples = Array.Empty<NetworkSample>();
         }
         else
         {
             Services.NetworkMonitor.Start();
-            NetworkStatus = L("Health_NetworkRunning");
+            SetNetworkStatus("Health_NetworkRunning");
         }
         Raise(nameof(NetworkButtonKey));
         Raise(nameof(NetworkButtonText));
         NetworkSamplesUpdated?.Invoke(_samples);
+    }
+
+    private void SetNetworkStatus(string key)
+    {
+        _networkStatusKey = key;
+        NetworkStatus = L(key);
     }
 
     private void OnNetworkSample(IReadOnlyList<NetworkSample> samples)
@@ -169,19 +209,31 @@ public sealed class HealthViewModel : ViewModelBase
         _ => L("Health_ScorePoor")
     };
 
-    private static string SeverityLabel(HealthSeverity severity) => severity switch
+    private static string SeverityKey(HealthSeverity severity) => severity switch
     {
-        HealthSeverity.Critical => "●",
-        HealthSeverity.Warning => "▲",
+        HealthSeverity.Critical => "Critical",
+        HealthSeverity.Warning => "Warning",
+        _ => "Info"
+    };
+
+    private static string SeverityGlyph(string key) => key switch
+    {
+        "Critical" => "●",
+        "Warning" => "▲",
         _ => "○"
     };
 
     protected override void OnLanguageChanged()
     {
-        RefreshAlerts();
+        // 只重本地化已缓存的数据，不重跑体检、不重复读盘、不重建网络采样。
+        ApplyIssueText();
+        RefreshHealthText();
+        ApplyAlertText();
         Raise(nameof(NetworkButtonText));
-        // 语言切换后若有体检结果，重新渲染消息（含评分档位文案）
-        if (Issues.Count > 0 && !IsChecking) _ = CheckAsync();
+        if (!string.IsNullOrEmpty(_networkStatusKey))
+            NetworkStatus = L(_networkStatusKey);
+        if (_allGoodPlaceholder && Issues.Count > 0)
+            Issues[0].SeverityText = L("Health_AllGood");
     }
 
     public override void Dispose()
@@ -192,14 +244,23 @@ public sealed class HealthViewModel : ViewModelBase
     }
 }
 
-public sealed class HealthIssueVm
+/// <summary>体检问题展示项：文案可就地更新（切语言时不需重建集合）。</summary>
+public sealed class HealthIssueVm : ObservableObject
 {
-    public required string SeverityText { get; init; }
+    private string _severityText = string.Empty;
+    private string _message = string.Empty;
+
+    public required string SeverityKey { get; init; }
     public required string Category { get; init; }
-    public required string Message { get; init; }
+    public required string MessageKey { get; init; }
+    public string MessageArg { get; init; } = string.Empty;
     public bool IsWarning { get; init; }
+
+    public string SeverityText { get => _severityText; set => Set(ref _severityText, value); }
+    public string Message { get => _message; set => Set(ref _message, value); }
 }
 
+/// <summary>告警历史展示项：文本一次性生成即可，切语言时由 VM 重建集合。</summary>
 public sealed class AlertHistoryVm
 {
     public required string Time { get; init; }

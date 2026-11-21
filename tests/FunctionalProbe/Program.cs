@@ -558,6 +558,80 @@ await Test("Feature: network monitor start/sample/stop", async () =>
 });
 
 Emit("");
+Emit("## 十三、超高难度冒烟：告警并发 / 配置轰炸 / 长稳（v1.2.2）");
+await Test("Extreme: alert history 600 appends + concurrent clears", async () =>
+{
+    var svc = hub.AlertHistory;
+    svc.Clear();
+    var writers = Enumerable.Range(0, 8).Select(w => Task.Run(() =>
+    {
+        for (var i = 0; i < 75; i++)
+            svc.Append(new SystemAssistant.Models.Health.AlertHistoryEntry
+            {
+                SensorName = $"S{w}-{i}", Value = 90 + i, Threshold = 85, Unit = "°C"
+            });
+    })).ToArray();
+    var clearer = Task.Run(async () =>
+    {
+        for (var i = 0; i < 5; i++) { await Task.Delay(60); svc.Clear(); }
+    });
+    await Task.WhenAll(writers.Append(clearer));
+    var all = svc.GetAll();
+    // 关键不变量：裁剪上限生效、清空后不"复活"成乱序/损坏数据
+    if (all.Count > 500) throw new InvalidOperationException($" exceeded 500 cap: {all.Count}");
+    if (all.Any(a => string.IsNullOrEmpty(a.SensorName)))
+        throw new InvalidOperationException("corrupted entry after concurrent clear");
+    svc.Clear();
+    return $"600 appends + 5 concurrent clears, final={all.Count} entries (<=500), no corruption";
+});
+await TestSync("Extreme: config with 40 corrupt fields keeps valid ones", () =>
+{
+    var path = Path.Combine(temp, "barrage40.json");
+    // 构造 40 个字段：一半合法、一半类型错误，验证逐字段试解析不整体回滚
+    var parts = new List<string>
+    {
+        "\"Theme\":\"Dark\"", "\"Language\":\"EnUs\"", "\"RefreshIntervalMs\":750", "\"Version\":1"
+    };
+    for (var i = 0; i < 40; i++)
+    {
+        var key = i % 2 == 0 ? $"DefaultExportDirectory{i}" : "UnknownField" + i;
+        parts.Add($"\"{key}\":{(i % 3 == 0 ? "12345" : "\"ok\"")}");
+    }
+    File.WriteAllText(path, "{" + string.Join(",", parts) + "}");
+    var s = JsonStorage.Load<SystemAssistant.Models.Config.AppSettings>(path);
+    if (s.Theme != SystemAssistant.Models.Config.ThemeMode.Dark) throw new InvalidOperationException("theme lost");
+    if (s.RefreshIntervalMs != 750) throw new InvalidOperationException("interval lost");
+    return $"40-field barrage, core fields kept (theme={s.Theme}, interval={s.RefreshIntervalMs})";
+});
+await Test("Extreme: health report stability under repeated runs", async () =>
+{
+    var scores = new List<int>();
+    for (var i = 0; i < 8; i++)
+    {
+        var r = await hub.HealthCheck.RunAsync();
+        scores.Add(r.Score);
+        await Task.Delay(80);
+    }
+    if (scores.Any(x => x is < 0 or > 100)) throw new InvalidOperationException("score out of range");
+    return $"8 consecutive health checks, scores=[{string.Join(",", scores)}]";
+});
+await Test("Extreme: network monitor rapid start/stop x20", async () =>
+{
+    var net = new SystemAssistant.Core.Health.NetworkMonitorService { RefreshIntervalMs = 250 };
+    var samples = 0;
+    net.SampleUpdated += _ => Interlocked.Increment(ref samples);
+    for (var i = 0; i < 20; i++)
+    {
+        net.Start(); net.Start();
+        await Task.Delay(30);
+        net.Stop(); net.Stop();
+        if (net.IsRunning) throw new InvalidOperationException($"running after stop#{i}");
+    }
+    net.Dispose();
+    return $"20x start/stop cycles, samples={samples}, no double worker";
+});
+
+Emit("");
 Emit("## 汇总");
 var passed = results.Count(x => x.Ok);
 Emit($"PASS {passed} / {results.Count}");

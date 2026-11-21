@@ -42,9 +42,19 @@ public static partial class PageViewLocator
             UiFactory.Button("Common_UnselectAll", vm.SelectNoneCommand));
 
         var groupsPanel = new StackPanel { Spacing = 8 };
+        // 分组头是组合文本（名称 + 数量单位 + 体积），Localize 无法自动刷新；
+        // 记录每个 header TextBlock，语言切换时按当前语言重建，避免残留旧语言。
+        var groupHeaders = new List<(ScanGroup Group, TextBlock Text)>();
+        void RefreshGroupHeaders()
+        {
+            foreach (var (group, text) in groupHeaders)
+                text.Text = $"{group.Title}   ({group.Items.Count} {LocalizationService.Instance.Get("Common_ItemsUnit")} / {FormatHelper.FormatBytes(group.TotalSizeBytes)})";
+        }
+        LocalizationService.Instance.LanguageChanged += (_, _) => RefreshGroupHeaders();
         vm.GroupsChanged += () =>
         {
             groupsPanel.Children.Clear();
+            groupHeaders.Clear();
             foreach (var group in vm.Groups)
             {
                 var table = new TableView { Height = 230 };
@@ -64,9 +74,14 @@ public static partial class PageViewLocator
                     setChecked: (o, value) => ((ScanItem)o).IsChecked = value);
                 table.SetItems(group.Items);
 
+                var headerText = new TextBlock
+                {
+                    Text = $"{group.Title}   ({group.Items.Count} {LocalizationService.Instance.Get("Common_ItemsUnit")} / {FormatHelper.FormatBytes(group.TotalSizeBytes)})"
+                };
+                groupHeaders.Add((group, headerText));
                 var expander = new Expander
                 {
-                    Header = $"{group.Title}   ({group.Items.Count} {LocalizationService.Instance.Get("Common_ItemsUnit")} / {FormatHelper.FormatBytes(group.TotalSizeBytes)})",
+                    Header = headerText,
                     Content = table,
                     IsExpanded = group.Category is ScanCategory.SystemTemp or ScanCategory.BrowserCache,
                     Margin = new Thickness(0, 0, 0, 4)

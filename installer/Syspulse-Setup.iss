@@ -1,5 +1,5 @@
 ; ============================================================================
-;  Syspulse 1.2.1 -- Inno Setup 6 installer script
+;  Syspulse 1.2.2 -- Inno Setup 6 installer script
 ;  ---------------------------------------------------------------------------
 ;  * Per-user installation: no administrator rights, no UAC prompt.
 ;    Default directory is %LOCALAPPDATA%\Programs\Syspulse ({userpf}).
@@ -13,7 +13,7 @@
 ; ============================================================================
 
 #define MyAppName      "Syspulse"
-#define MyAppVersion   "1.2.1"
+#define MyAppVersion   "1.2.2"
 #define MyAppPublisher "Syspulse Project"
 #define MyAppURL       "https://github.com/karlozevu/Syspulse"
 #define MyAppExeName   "Syspulse.exe"
@@ -30,12 +30,12 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppCopyright=Copyright (C) 2026 {#MyAppPublisher}
-VersionInfoVersion=1.2.1.0
+VersionInfoVersion=1.2.2.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}
 VersionInfoProductTextVersion={#MyAppVersion}
-VersionInfoOriginalFileName=Syspulse-Setup-1.2.1.exe
+VersionInfoOriginalFileName=Syspulse-Setup-1.2.2.exe
 
 ; --- Per-user install (no UAC) --------------------------------------------
 PrivilegesRequired=lowest
@@ -57,7 +57,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; path in this script (OutputDir, MessagesFile, [Files] Source, ...).
 SourceDir=..
 OutputDir=artifacts
-OutputBaseFilename=Syspulse-Setup-1.2.1
+OutputBaseFilename=Syspulse-Setup-1.2.2
 Compression=lzma2/max
 SolidCompression=yes
 ; Custom icon: used by setup.exe itself, the wizard title bar and the taskbar.

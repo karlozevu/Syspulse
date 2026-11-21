@@ -12,6 +12,9 @@ public sealed class AlertHistoryService : IAlertHistoryService
 {
     private const int MaxEntries = 500;
     private readonly string _path;
+    // 所有读写/裁剪/清空统一用这一把实例锁：此前 Append/Trim 无锁、
+    // Clear 用另一把静态锁，并发时旧快照会覆盖新追加导致"清空后告警复活"。
+    private readonly object _sync = new();
 
     public AlertHistoryService()
     {
@@ -20,39 +23,50 @@ public sealed class AlertHistoryService : IAlertHistoryService
 
     public void Append(AlertHistoryEntry entry)
     {
-        try
+        lock (_sync)
         {
-            JsonStorage.AppendLine(_path, entry);
-            TrimIfNeeded();
-        }
-        catch
-        {
-            // 历史落盘是辅助功能：失败不应影响告警主流程
+            try
+            {
+                JsonStorage.AppendLine(_path, entry);
+                TrimIfNeededLocked();
+            }
+            catch
+            {
+                // 历史落盘是辅助功能：失败不应影响告警主流程
+            }
         }
     }
 
     public IReadOnlyList<AlertHistoryEntry> GetAll()
-        => JsonStorage.ReadLines<AlertHistoryEntry>(_path);
+    {
+        lock (_sync)
+        {
+            try { return JsonStorage.ReadLines<AlertHistoryEntry>(_path); }
+            catch { return Array.Empty<AlertHistoryEntry>(); }
+        }
+    }
 
     public void Clear()
     {
-        try
+        lock (_sync)
         {
-            lock (Sync) File.WriteAllText(_path, string.Empty);
+            try { File.WriteAllText(_path, string.Empty); }
+            catch { /* 与 OperationLog.Clear 一致：静默降级 */ }
         }
-        catch { /* 与 OperationLog.Clear 一致：静默降级 */ }
     }
 
-    private static readonly object Sync = new();
-
-    private void TrimIfNeeded()
+    /// <summary>在 _sync 锁内调用：超过上限时原子裁剪（临时文件 + 替换）。</summary>
+    private void TrimIfNeededLocked()
     {
         try
         {
+            if (!File.Exists(_path)) return;
             var lines = File.ReadAllLines(_path);
             if (lines.Length <= MaxEntries) return;
             var kept = lines.TakeLast(MaxEntries).ToArray();
-            File.WriteAllLines(_path, kept);
+            var temp = _path + ".trim.tmp";
+            File.WriteAllLines(temp, kept);
+            File.Move(temp, _path, overwrite: true);
         }
         catch { /* 裁剪失败可下次再试，不影响写入 */ }
     }

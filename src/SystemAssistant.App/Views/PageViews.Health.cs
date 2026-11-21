@@ -40,17 +40,18 @@ public static partial class PageViewLocator
         issueList.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(HealthViewModel.Issues)));
         issueList.ItemTemplate = UiFactory.DefaultTemplate(o =>
         {
-            var issue = (HealthIssueVm)o;
+            // 用绑定而非一次性赋值：切语言时 VM 就地更新 HealthIssueVm 文本，
+            // 绑定会自动刷新，无需重建整个集合或重跑体检。
+            var severity = new TextBlock { Width = 24 };
+            severity.Bind(TextBlock.TextProperty, new Binding(nameof(HealthIssueVm.SeverityText)));
+            var message = new TextBlock { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+            message.Bind(TextBlock.TextProperty, new Binding(nameof(HealthIssueVm.Message)));
             return new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Spacing = 10,
                 Margin = new Thickness(0, 4),
-                Children =
-                {
-                    new TextBlock { Text = issue.SeverityText, Width = 24 },
-                    new TextBlock { Text = issue.Message, TextWrapping = Avalonia.Media.TextWrapping.Wrap }
-                }
+                Children = { severity, message }
             };
         });
         var issuesCard = UiFactory.Section("Health_Issues", issueList);

@@ -2,7 +2,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 
 rem ==========================================================================
-rem  Build Syspulse-Setup-1.2.1.exe with Inno Setup 6 (ISCC.exe).
+rem  Build Syspulse-Setup-1.2.2.exe with Inno Setup 6 (ISCC.exe).
 rem  Toolchain is kept portable inside the workspace at .tools\inno\.
 rem ==========================================================================
 
@@ -12,7 +12,7 @@ for %%I in ("%SCRIPT_DIR%..\..")  do set "WS_DIR=%%~fI"
 
 set "ISS=%PROJ_DIR%\installer\Syspulse-Setup.iss"
 set "SRC=%PROJ_DIR%\artifacts\win-x64-self-contained\Syspulse.exe"
-set "OUT=%PROJ_DIR%\artifacts\Syspulse-Setup-1.2.1.exe"
+set "OUT=%PROJ_DIR%\artifacts\Syspulse-Setup-1.2.2.exe"
 
 echo [1/4] Locating Inno Setup compiler (ISCC.exe) ...
 set "ISCC=%WS_DIR%\.tools\inno\ISCC.exe"
@@ -58,5 +58,5 @@ if not exist "%OUT%" (
 )
 for %%F in ("%OUT%") do echo       Output: %%~fF
 for %%F in ("%OUT%") do echo       Size:   %%~zF bytes
-echo [OK] Build complete: Syspulse-Setup-1.2.1.exe
+echo [OK] Build complete: Syspulse-Setup-1.2.2.exe
 exit /b 0
